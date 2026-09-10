@@ -195,6 +195,10 @@
     font-family:var(--font-mono); font-weight:700; font-size:52px; line-height:1;
     letter-spacing:-.02em;
   }
+  .dist-num.step-flash{ animation:stepFlash .28s ease-out; }
+  @keyframes stepFlash{ 0%{transform:scale(1.14)} 100%{transform:scale(1)} }
+  .center-hub.step-flash{ animation:hubFlash .28s ease-out; }
+  @keyframes hubFlash{ 0%{transform:scale(2.4); background:var(--good)} 100%{transform:scale(1); background:var(--ink)} }
   .dist-unit{ font-family:var(--font-mono); font-size:15px; color:var(--ink-dim); margin-top:4px;}
   .heading-readout{
     margin-top:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink-faint);
@@ -296,6 +300,7 @@
     .pulse{ animation:none; opacity:.25; }
     .arrow-rotor{ transition:none; }
     .arrival{ animation:none; }
+    .dist-num.step-flash, .center-hub.step-flash{ animation:none; }
   }
 </style>
 
@@ -354,6 +359,7 @@
       <div class="heading-readout tabular">
         <span id="headingRead">RUMBO 000°</span>
         <span id="bearingRead">OBJETIVO 000°</span>
+        <span id="stepRead">PASOS 0</span>
       </div>
     </div>
 
@@ -454,6 +460,8 @@ function selectTarget(shelf){
   if(!sensorsActive) user.heading = ENTRANCE.heading;
   arrived = false;
   lastRel = null;
+  stepCount = 0;
+  if($('#stepRead')) $('#stepRead').textContent = 'PASOS 0';
   errMsg.hidden = true;
   emptyState.hidden = true;
   navUI.hidden = false;
@@ -546,7 +554,7 @@ function setSensorUI(state, msg){
   if(state==='active'){
     txt.textContent = 'Sensores activos';
     btn.textContent = '📍 Recalibrar posición inicial';
-    hint.textContent = 'Ponte de pie en tu punto de partida y toca el botón de nuevo para recalibrar la distancia.';
+    hint.textContent = 'Camina normalmente: cada paso mueve tu posición en el mapa. Si te desvías, ponte en el punto de partida y toca el botón para recalibrar.';
     hideSensorAlert();
   } else if(state==='error'){
     txt.textContent = 'Sensores no disponibles';
@@ -602,6 +610,64 @@ function startListening(){
   }, true);
 }
 
+/* ---------------------------------------------------------------
+   Podómetro: detecta pasos reales con DeviceMotionEvent y desplaza
+   al usuario STEP_METERS en la dirección de la brújula por cada paso.
+------------------------------------------------------------------*/
+const STEP_METERS = 0.7;              // distancia estimada por zancada
+const STEP_ACCEL_THRESHOLD = 1.6;     // m/s² sobre la línea base para contar un paso
+const STEP_RESET_THRESHOLD = 0.8;     // debe bajar de aquí antes de permitir el siguiente pico
+const MIN_STEP_INTERVAL_MS = 300;     // tope ~3.3 pasos/seg, cadencia humana real
+const MAP_BOUNDS = { minX:30, maxX:570, minY:15, maxY:410 };
+
+let motionActive = false;
+let stepCount = 0;
+let gravityBaseline = 9.8;
+let lastStepTime = 0;
+let abovePeak = false;
+
+function flashStep(){
+  const dist = $('#distNum'), hub = $('.center-hub');
+  [dist, hub].forEach(el=>{ el.classList.remove('step-flash'); void el.offsetWidth; el.classList.add('step-flash'); });
+  if(navigator.vibrate) navigator.vibrate(50);
+}
+
+function registerStep(){
+  if(!target || arrived) return;
+  const rad = user.heading * Math.PI / 180;
+  user.x += STEP_METERS * SCALE * Math.sin(rad);
+  user.y -= STEP_METERS * SCALE * Math.cos(rad);
+  user.x = Math.max(MAP_BOUNDS.minX, Math.min(MAP_BOUNDS.maxX, user.x));
+  user.y = Math.max(MAP_BOUNDS.minY, Math.min(MAP_BOUNDS.maxY, user.y));
+  stepCount++;
+  $('#stepRead').textContent = `PASOS ${stepCount}`;
+  flashStep();
+  scheduleRender();
+}
+
+function handleMotion(e){
+  const a = e.accelerationIncludingGravity || e.acceleration;
+  if(!a || a.x===null || a.x===undefined) return;
+  const magnitude = Math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+  // línea base de gravedad de adaptación lenta (filtro paso-bajo), para
+  // aislar el "golpe" dinámico de cada zancada sin importar cómo sostengas el teléfono
+  gravityBaseline += (magnitude - gravityBaseline) * 0.08;
+  const delta = magnitude - gravityBaseline;
+  const now = performance.now();
+
+  if(!abovePeak && delta > STEP_ACCEL_THRESHOLD && (now - lastStepTime) > MIN_STEP_INTERVAL_MS){
+    abovePeak = true;
+    lastStepTime = now;
+    registerStep();
+  } else if(abovePeak && delta < STEP_RESET_THRESHOLD){
+    abovePeak = false; // el pico bajó del umbral: listo para detectar el próximo paso
+  }
+}
+
+function startMotionListening(){
+  window.addEventListener('devicemotion', handleMotion, true);
+}
+
 async function enableSensors(){
   hideSensorAlert();
 
@@ -615,8 +681,9 @@ async function enableSensors(){
   }
 
   try{
-    // Solicitud explícita de permiso — debe dispararse dentro del onClick
-    // del botón (gesto del usuario), requisito de iOS 13+ / Safari.
+    // Solicitudes explícitas de permiso — deben dispararse dentro del onClick
+    // del botón (gesto del usuario), requisito de iOS 13+ / Safari, tanto
+    // para orientación (brújula) como para movimiento (podómetro).
     if(typeof DeviceOrientationEvent.requestPermission === 'function'){
       const resp = await DeviceOrientationEvent.requestPermission();
       if(resp !== 'granted'){
@@ -624,11 +691,23 @@ async function enableSensors(){
         return;
       }
     }
+    if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+      const motionResp = await DeviceMotionEvent.requestPermission();
+      if(motionResp !== 'granted'){
+        setSensorUI('error', 'Permiso de movimiento denegado. Actívalo en Ajustes → Safari → Movimiento y orientación, y vuelve a intentarlo.');
+        return;
+      }
+    }
     if(!sensorsActive){ startListening(); sensorsActive = true; }
+    if(!motionActive && typeof DeviceMotionEvent !== 'undefined'){ startMotionListening(); motionActive = true; }
     user.x = ENTRANCE.x; user.y = ENTRANCE.y;
     arrived = false;
     arrival.hidden = true;
     sensorEventReceived = false;
+    stepCount = 0;
+    gravityBaseline = 9.8;
+    abovePeak = false;
+    $('#stepRead').textContent = 'PASOS 0';
     setSensorUI('active');
     armWatchdog();
     render();
