@@ -1,0 +1,704 @@
+<title>BiblioRadar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  /* ---- Tokens: deliberate single dark "instrument" theme (radar/locator device) ---- */
+  :root{
+    --bg:#090c11;
+    --bg-2:#05070a;
+    --surface:#121822;
+    --surface-2:#1a2230;
+    --surface-3:#212b3b;
+    --line:#262f3f;
+    --line-soft:#1c2430;
+    --ink:#edf2f8;
+    --ink-dim:#8d97ac;
+    --ink-faint:#5b6478;
+    --signal:#46d7e8;
+    --signal-soft:rgba(70,215,232,.16);
+    --brass:#e3a052;
+    --brass-soft:rgba(227,160,82,.18);
+    --good:#4ade80;
+    --good-soft:rgba(74,222,128,.18);
+    --danger:#f2735c;
+    --danger-soft:rgba(242,115,92,.15);
+    --font-ui:'Manrope',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono','SFMono-Regular',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg-2);
+    color:var(--ink);
+    font-family:var(--font-ui);
+    -webkit-font-smoothing:antialiased;
+    display:flex;
+    justify-content:center;
+    min-height:100dvh;
+    padding:28px 14px;
+  }
+  h1,h2,h3{text-wrap:balance}
+  .tabular{font-variant-numeric:tabular-nums}
+  button{font-family:inherit}
+  button:focus-visible,input:focus-visible,[tabindex]:focus-visible{
+    outline:2px solid var(--signal);
+    outline-offset:2px;
+  }
+
+  /* ---- Phone frame ---- */
+  .device{
+    width:100%;
+    max-width:404px;
+    background:var(--bg);
+    border-radius:38px;
+    border:1px solid var(--line);
+    box-shadow:0 40px 80px -30px rgba(0,0,0,.7), 0 0 0 6px var(--bg-2), 0 0 0 7px #2c3547;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+    min-height:840px;
+    position:relative;
+  }
+  .device::before{
+    content:'';
+    position:absolute; top:0; left:50%; transform:translateX(-50%);
+    width:120px; height:22px; background:var(--bg-2);
+    border-radius:0 0 16px 16px; z-index:30;
+  }
+
+  /* ---- Header / search ---- */
+  .topbar{
+    padding:34px 18px 14px;
+    background:linear-gradient(180deg,var(--surface) 0%, var(--bg) 100%);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .eyebrow{
+    font-size:11px; letter-spacing:.11em; text-transform:uppercase;
+    color:var(--ink-faint); font-weight:700;
+  }
+  .badge-sim{
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--brass); background:var(--brass-soft);
+    border:1px solid rgba(227,160,82,.35);
+    padding:3px 8px; border-radius:99px; font-weight:700;
+  }
+  .search-row{
+    margin-top:12px;
+    display:flex; align-items:center; gap:8px;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:11px 12px;
+  }
+  .search-row input{
+    flex:1; background:transparent; border:none; color:var(--ink);
+    font-family:var(--font-mono); font-size:15.5px; letter-spacing:.02em;
+  }
+  .search-row input::placeholder{color:var(--ink-faint); font-family:var(--font-ui)}
+  .search-row input:focus{outline:none}
+  .go-btn{
+    background:var(--signal); color:#04262c; border:none;
+    width:32px; height:32px; border-radius:9px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; flex-shrink:0;
+  }
+  .go-btn:active{transform:scale(.94)}
+  .err-msg{
+    margin-top:8px; font-size:12.5px; color:var(--danger);
+    display:flex; align-items:center; gap:6px;
+  }
+  .chips{
+    margin-top:12px; display:flex; gap:6px; overflow-x:auto;
+    padding-bottom:2px; scrollbar-width:none;
+  }
+  .chips::-webkit-scrollbar{display:none}
+  .chip{
+    flex-shrink:0; white-space:nowrap;
+    background:var(--surface-2); border:1px solid var(--line);
+    color:var(--ink-dim); font-size:11.5px; font-weight:600;
+    padding:6px 10px; border-radius:99px; cursor:pointer;
+    transition:border-color .15s, color .15s;
+  }
+  .chip:hover{border-color:var(--signal); color:var(--ink)}
+  .chip.active{border-color:var(--signal); color:var(--signal); background:var(--signal-soft)}
+  .chip b{color:inherit; font-family:var(--font-mono); font-weight:600}
+
+  /* ---- Radar stage ---- */
+  .stage{
+    flex:1; position:relative; display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-start;
+    padding:26px 18px 14px;
+    overflow:hidden;
+  }
+  .empty-state{
+    margin:auto; text-align:center; color:var(--ink-faint);
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .empty-state svg{opacity:.5}
+  .status-pill{
+    font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+    padding:6px 14px; border-radius:99px;
+    border:1px solid var(--line);
+    transition:color .3s,border-color .3s,background-color .3s;
+  }
+  .target-line{
+    margin-top:10px; text-align:center;
+  }
+  .target-line .code{font-family:var(--font-mono); font-size:13px; color:var(--ink-dim)}
+  .target-line .subject{font-size:17px; font-weight:800; margin-top:2px}
+
+  .radar-wrap{
+    position:relative; width:266px; height:266px; margin:26px 0 6px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .radar-ring, .radar-ring-inner{
+    position:absolute; border-radius:50%;
+    border:1px solid var(--line);
+  }
+  .radar-ring{ inset:0; }
+  .radar-ring-inner{ inset:34px; border-style:dashed; border-color:var(--line-soft); }
+  .tick{ position:absolute; left:50%; top:6px; width:2px; height:9px; background:var(--ink-faint); transform-origin:1px 127px; border-radius:1px;}
+  .glow-disc{
+    position:absolute; inset:52px; border-radius:50%;
+    background:radial-gradient(circle at 50% 45%, var(--signal-soft), transparent 72%);
+    transition:background .4s;
+  }
+  .pulse{
+    position:absolute; inset:52px; border-radius:50%;
+    border:1.5px solid var(--signal);
+    opacity:0; animation:pulse 2.6s ease-out infinite;
+  }
+  @keyframes pulse{
+    0%{transform:scale(.72); opacity:.55}
+    100%{transform:scale(1.35); opacity:0}
+  }
+  .arrow-rotor{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    transition:transform .15s linear;
+  }
+  .arrow-core{
+    width:86px; height:86px; border-radius:50%;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 24px -8px rgba(0,0,0,.6);
+  }
+  .center-hub{
+    position:absolute; width:8px; height:8px; border-radius:50%;
+    background:var(--ink); box-shadow:0 0 0 5px var(--bg);
+  }
+  .dist-block{ text-align:center; margin-top:4px; }
+  .dist-num{
+    font-family:var(--font-mono); font-weight:700; font-size:52px; line-height:1;
+    letter-spacing:-.02em;
+  }
+  .dist-unit{ font-family:var(--font-mono); font-size:15px; color:var(--ink-dim); margin-top:4px;}
+  .heading-readout{
+    margin-top:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink-faint);
+    display:flex; gap:14px;
+  }
+
+  /* proximity states */
+  .stage[data-prox="far"]   { --prox: var(--signal); }
+  .stage[data-prox="near"]  { --prox: #8fe0b0; }
+  .stage[data-prox="close"] { --prox: var(--good); }
+  .status-pill{ color:var(--prox,var(--signal)); border-color:color-mix(in srgb, var(--prox,var(--signal)) 45%, var(--line)); background:color-mix(in srgb, var(--prox,var(--signal)) 12%, transparent);}
+  .radar-ring{ border-color:color-mix(in srgb, var(--prox,var(--signal)) 35%, var(--line)); }
+  .glow-disc{ background:radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--prox,var(--signal)) 55%, transparent), transparent 72%); }
+  .pulse{ border-color:var(--prox,var(--signal)); }
+  .arrow-core{ border-color:color-mix(in srgb, var(--prox,var(--signal)) 50%, var(--line)); }
+  .dist-num{ color:var(--prox,var(--signal)); }
+
+  /* ---- Sensor bar (brújula real del dispositivo) ---- */
+  .sensor-bar{
+    padding:14px 16px 18px;
+    background:linear-gradient(180deg, transparent, var(--surface) 40%);
+    border-top:1px solid var(--line-soft);
+  }
+  .sensor-status{
+    display:flex; align-items:center; gap:7px; margin-bottom:10px;
+    font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--ink-dim);
+  }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex-shrink:0; }
+  .dot-active{ background:var(--good); box-shadow:0 0 0 3px var(--good-soft); animation:dotpulse 1.8s infinite; }
+  .dot-error{ background:var(--danger); box-shadow:0 0 0 3px var(--danger-soft); }
+  @keyframes dotpulse{ 0%,100%{opacity:1} 50%{opacity:.45} }
+  .sensor-btn{
+    width:100%; background:var(--signal-soft); border:1px solid rgba(70,215,232,.4);
+    color:var(--signal); font-weight:800; font-size:14px; padding:14px; border-radius:14px;
+    cursor:pointer; transition:transform .1s, background-color .15s;
+  }
+  .sensor-btn:active{ transform:scale(.97); background:rgba(70,215,232,.26); }
+  .sensor-hint{
+    margin-top:9px; font-size:11.5px; line-height:1.4; color:var(--ink-faint); text-align:center;
+  }
+  .sensor-alert{
+    display:flex; align-items:flex-start; gap:8px;
+    background:var(--danger-soft); border:1px solid rgba(242,115,92,.45);
+    color:var(--danger); font-size:12.5px; font-weight:600; line-height:1.4;
+    padding:10px 11px; border-radius:12px; margin-bottom:10px;
+    animation:alertIn .25s ease-out;
+  }
+  .sensor-alert span:first-child{ flex-shrink:0; }
+  .sensor-alert p{ margin:0; flex:1; }
+  .sensor-alert button{
+    flex-shrink:0; background:none; border:none; color:var(--danger);
+    font-size:14px; line-height:1; cursor:pointer; padding:2px; opacity:.7;
+  }
+  .sensor-alert button:hover{ opacity:1; }
+  @keyframes alertIn{ from{opacity:0; transform:translateY(-4px)} to{opacity:1; transform:translateY(0)} }
+  .tilt-warn{
+    position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:25;
+    background:var(--brass-soft); border:1px solid rgba(227,160,82,.4); color:var(--brass);
+    font-size:10.5px; font-weight:700; padding:5px 11px; border-radius:99px; white-space:nowrap;
+  }
+
+  /* ---- Mini-map overlay ---- */
+  .minimap{
+    position:absolute; right:14px; bottom:14px; z-index:20;
+    width:132px; background:rgba(18,24,34,.9); backdrop-filter:blur(6px);
+    border:1px solid var(--line); border-radius:14px; padding:7px;
+    box-shadow:0 12px 30px -10px rgba(0,0,0,.6);
+  }
+  .minimap-label{
+    font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint);
+    font-weight:700; margin-bottom:4px; display:block; padding-left:2px;
+  }
+
+  /* ---- Arrival overlay ---- */
+  .arrival{
+    position:absolute; inset:0; z-index:40;
+    background:radial-gradient(circle at 50% 32%, rgba(74,222,128,.16), var(--bg) 70%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:32px;
+    animation:rise .45s cubic-bezier(.2,.9,.3,1);
+  }
+  @keyframes rise{ from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:translateY(0)} }
+  .arrival-ring{
+    width:104px; height:104px; border-radius:50%;
+    background:var(--good-soft); border:1.5px solid var(--good);
+    display:flex; align-items:center; justify-content:center; margin-bottom:22px;
+  }
+  .arrival h2{ font-size:24px; font-weight:800; margin:0 0 6px; }
+  .arrival .code{ font-family:var(--font-mono); font-size:15px; color:var(--good); margin-top:14px; }
+  .arrival .subject{ font-size:14px; color:var(--ink-dim); margin-top:2px; }
+  .arrival button{
+    margin-top:26px; background:var(--good); color:#062910; border:none;
+    font-weight:800; font-size:14px; padding:13px 26px; border-radius:99px; cursor:pointer;
+  }
+  .arrival button:active{ transform:scale(.97); }
+
+  @media (prefers-reduced-motion: reduce){
+    .pulse{ animation:none; opacity:.25; }
+    .arrow-rotor{ transition:none; }
+    .arrival{ animation:none; }
+  }
+</style>
+
+<div class="device">
+  <!-- TOP SEARCH -->
+  <div class="topbar">
+    <div class="flex items-center justify-between">
+      <span class="eyebrow">BiblioRadar · Sala General</span>
+      <span class="badge-sim">● Sensor real</span>
+    </div>
+    <div class="search-row">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5b6478" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="searchInput" type="text" placeholder="Signatura, ej. HG 4022" autocomplete="off" spellcheck="false">
+      <button class="go-btn" id="goBtn" aria-label="Buscar">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+    <p class="err-msg" id="errMsg" hidden>⚠ No se encontró esa signatura en el fondo. Prueba con HG, QA, TK, DP, PN o ND.</p>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <!-- RADAR STAGE -->
+  <div class="stage" id="stage" data-prox="far">
+
+    <div class="empty-state" id="emptyState">
+      <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="9"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/></svg>
+      <p style="font-size:13.5px; max-width:200px;">Ingresa una signatura arriba para iniciar la búsqueda de precisión</p>
+    </div>
+
+    <div id="navUI" hidden style="display:flex; flex-direction:column; align-items:center; width:100%;">
+      <span class="status-pill" id="statusPill">Buscando estante</span>
+      <div class="target-line">
+        <div class="code" id="targetCode">E-2 · QA 75–76.99</div>
+        <div class="subject" id="targetSubject">Informática</div>
+      </div>
+
+      <div class="radar-wrap">
+        <div class="pulse"></div>
+        <div class="radar-ring"></div>
+        <div class="radar-ring-inner"></div>
+        <div class="glow-disc"></div>
+        <div class="arrow-rotor" id="arrowRotor">
+          <div class="arrow-core">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3.5 L18.5 18 L12 14.7 L5.5 18 Z" fill="currentColor" style="color:var(--prox,var(--signal))"/>
+            </svg>
+          </div>
+        </div>
+        <div class="center-hub"></div>
+      </div>
+
+      <div class="dist-block">
+        <div class="dist-num tabular" id="distNum">18</div>
+        <div class="dist-unit">METROS AL ESTANTE</div>
+      </div>
+      <div class="heading-readout tabular">
+        <span id="headingRead">RUMBO 000°</span>
+        <span id="bearingRead">OBJETIVO 000°</span>
+      </div>
+    </div>
+
+    <div class="tilt-warn" id="tiltWarn" hidden>📱 Mantén el teléfono en vertical</div>
+
+    <div class="minimap" id="minimapWrap" hidden>
+      <span class="minimap-label">Plano · Sala U</span>
+      <svg id="minimapSvg" viewBox="0 0 600 420" width="118" height="83"></svg>
+    </div>
+
+    <!-- ARRIVAL -->
+    <div class="arrival" id="arrival" hidden>
+      <div class="arrival-ring">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <h2>¡Llegaste al estante!</h2>
+      <p style="color:var(--ink-dim); font-size:13.5px;">Estás a menos de 1 metro del objetivo.</p>
+      <div class="code" id="arrivalCode">E-2 · QA 75–76.99</div>
+      <div class="subject" id="arrivalSubject">Informática</div>
+      <button id="arrivalReset">Buscar otra signatura</button>
+    </div>
+  </div>
+
+  <!-- SENSOR BAR -->
+  <div class="sensor-bar" id="sensorBar" hidden>
+    <div class="sensor-status"><span class="dot" id="sensorDot"></span><span id="sensorStatusText">Sensores inactivos</span></div>
+    <div class="sensor-alert" id="sensorAlert" role="alert" hidden>
+      <span>⚠️</span>
+      <p id="sensorAlertText">Acceso a sensores bloqueado por el navegador. Abre la app vía HTTPS.</p>
+      <button id="sensorAlertClose" aria-label="Cerrar aviso">✕</button>
+    </div>
+    <button class="sensor-btn" id="sensorBtn">🧭 Permitir acceso a sensores</button>
+    <p class="sensor-hint" id="sensorHint">Actívalo para que la flecha apunte al estante según hacia dónde gires el teléfono.</p>
+  </div>
+</div>
+
+<script>
+/* ---------------------------------------------------------------
+   data.js — fondo simulado: 6 estantes ubicados en un plano en U
+   (viewBox 0 0 600 420). Cada rango combina notación LCC/Dewey.
+------------------------------------------------------------------*/
+const SHELVES = [
+  { id:'E-1', class:'PN', start:1990,   end:1999,   subject:'Cine y medios',        x:70,  y:60  },
+  { id:'E-2', class:'QA', start:75,     end:76.99,  subject:'Informática',          x:70,  y:180 },
+  { id:'E-3', class:'TK', start:5101,   end:5991,   subject:'Telecomunicaciones',   x:150, y:340 },
+  { id:'E-4', class:'HG', start:4001,   end:4500,   subject:'Finanzas',             x:450, y:300 },
+  { id:'E-5', class:'DP', start:1,      end:402,    subject:'Historia de España',   x:530, y:170 },
+  { id:'E-6', class:'ND', start:1990,   end:3416,   subject:'Pintura',              x:530, y:60  },
+];
+
+const ENTRANCE = { x:250, y:335, heading:0 };
+const SCALE = 14;      // px por metro
+
+const rangeLabel = s => `${s.class} ${s.start}–${s.end}`;
+
+function parseSignature(raw){
+  const m = raw.trim().toUpperCase().match(/^([A-Z]{1,3})\s*([\d]+(?:\.\d+)?)/);
+  if(!m) return null;
+  return { cls:m[1], num:parseFloat(m[2]) };
+}
+function findShelf(raw){
+  const p = parseSignature(raw);
+  if(!p) return null;
+  const exact = SHELVES.find(s => s.class===p.cls && p.num>=s.start && p.num<=s.end);
+  if(exact) return exact;
+  const sameClass = SHELVES.filter(s=>s.class===p.cls);
+  if(sameClass.length) return sameClass[0];
+  return null;
+}
+
+/* ---------------------------------------------------------------
+   Estado + motor de navegación
+------------------------------------------------------------------*/
+let user = {...ENTRANCE};
+let target = null;
+let arrived = false;
+
+const $ = sel => document.querySelector(sel);
+const stage=$('#stage'), emptyState=$('#emptyState'), navUI=$('#navUI'), sensorBar=$('#sensorBar'),
+      minimapWrap=$('#minimapWrap'), arrival=$('#arrival'), errMsg=$('#errMsg'), tiltWarn=$('#tiltWarn');
+
+function buildChips(){
+  $('#chips').innerHTML = SHELVES.map(s=>
+    `<button class="chip" data-id="${s.id}"><b>${rangeLabel(s)}</b> · ${s.subject}</button>`
+  ).join('');
+  document.querySelectorAll('.chip').forEach(c=>{
+    c.addEventListener('click', ()=>{
+      const s = SHELVES.find(sh=>sh.id===c.dataset.id);
+      $('#searchInput').value = rangeLabel(s).replace('–','-');
+      selectTarget(s);
+    });
+  });
+}
+
+function selectTarget(shelf){
+  target = shelf;
+  user.x = ENTRANCE.x; user.y = ENTRANCE.y;
+  if(!sensorsActive) user.heading = ENTRANCE.heading;
+  arrived = false;
+  lastRel = null;
+  errMsg.hidden = true;
+  emptyState.hidden = true;
+  navUI.hidden = false;
+  sensorBar.hidden = false;
+  minimapWrap.hidden = false;
+  arrival.hidden = true;
+  document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.id===shelf.id));
+  checkTilt();
+  render();
+}
+
+function dist(){
+  const dx=target.x-user.x, dy=target.y-user.y;
+  return Math.sqrt(dx*dx+dy*dy)/SCALE;
+}
+function bearing(){
+  const dx=target.x-user.x, dy=target.y-user.y;
+  return (Math.atan2(dx,-dy)*180/Math.PI + 360) % 360;
+}
+
+let lastRel = null;
+function applyArrowRotation(rel){
+  if(lastRel===null){ lastRel = rel; }
+  else{
+    const diff = (((rel - (lastRel % 360)) + 540) % 360) - 180;
+    lastRel += diff;
+  }
+  $('#arrowRotor').style.transform = `rotate(${lastRel}deg)`;
+}
+
+function render(){
+  if(!target) return;
+  const m = dist();
+  const b = bearing();
+  const rel = (b - user.heading + 360) % 360;
+
+  $('#targetCode').textContent = `${target.id} · ${rangeLabel(target)}`;
+  $('#targetSubject').textContent = target.subject;
+  applyArrowRotation(rel);
+  $('#distNum').textContent = m < 1 ? m.toFixed(1) : Math.round(m);
+  $('#headingRead').textContent = `RUMBO ${String(Math.round(user.heading)).padStart(3,'0')}°`;
+  $('#bearingRead').textContent = `OBJETIVO ${String(Math.round(b)).padStart(3,'0')}°`;
+
+  let prox='far', pill='Buscando estante';
+  if(m<1){ prox='close'; }
+  else if(m<3){ prox='close'; pill='¡Casi llegas!'; }
+  else if(m<8){ prox='near'; pill='Te estás acercando'; }
+  else { prox='far'; pill='Sigue la flecha'; }
+  stage.dataset.prox = prox;
+  $('#statusPill').textContent = pill;
+
+  drawMinimap();
+
+  if(m < 1 && !arrived){
+    arrived = true;
+    $('#arrivalCode').textContent = `${target.id} · ${rangeLabel(target)}`;
+    $('#arrivalSubject').textContent = target.subject;
+    arrival.hidden = false;
+  }
+}
+
+/* ---------------------------------------------------------------
+   Sensores reales: brújula del teléfono (DeviceOrientationEvent)
+------------------------------------------------------------------*/
+const BLOCKED_MSG = 'Acceso a sensores bloqueado por el navegador. Abre la app vía HTTPS.';
+
+let sensorsActive = false;
+let receivedAbsolute = false;
+let sensorEventReceived = false;
+let watchdogTimer = null;
+let rafPending = false;
+let smoothedHeading = null;
+
+function scheduleRender(){
+  if(rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(()=>{ rafPending=false; render(); });
+}
+
+function showSensorAlert(msg){
+  $('#sensorAlertText').textContent = msg;
+  $('#sensorAlert').hidden = false;
+}
+function hideSensorAlert(){ $('#sensorAlert').hidden = true; }
+$('#sensorAlertClose').addEventListener('click', hideSensorAlert);
+
+function setSensorUI(state, msg){
+  const dot=$('#sensorDot'), txt=$('#sensorStatusText'), btn=$('#sensorBtn'), hint=$('#sensorHint');
+  dot.className = 'dot' + (state==='active' ? ' dot-active' : state==='error' ? ' dot-error' : '');
+  if(state==='active'){
+    txt.textContent = 'Sensores activos';
+    btn.textContent = '📍 Recalibrar posición inicial';
+    hint.textContent = 'Ponte de pie en tu punto de partida y toca el botón de nuevo para recalibrar la distancia.';
+    hideSensorAlert();
+  } else if(state==='error'){
+    txt.textContent = 'Sensores no disponibles';
+    btn.textContent = 'Reintentar';
+    hint.textContent = 'Toca el botón para volver a solicitar acceso a los sensores.';
+    showSensorAlert(msg || BLOCKED_MSG);
+  } else {
+    txt.textContent = 'Sensores inactivos';
+    btn.textContent = '🧭 Permitir acceso a sensores';
+    hint.textContent = 'Actívalo para que la flecha apunte al estante según hacia dónde gires el teléfono.';
+  }
+}
+
+/* Vigía: si tras conceder permiso no llega NINGÚN evento de orientación en
+   2.5s, el navegador (o el iframe que aloja la página) está bloqueando el
+   acceso al sensor en silencio — se lo avisamos al usuario en pantalla. */
+function armWatchdog(){
+  clearTimeout(watchdogTimer);
+  watchdogTimer = setTimeout(()=>{
+    if(!sensorEventReceived) setSensorUI('error', BLOCKED_MSG);
+  }, 2500);
+}
+
+function handleOrientation(e){
+  if(!sensorEventReceived){ sensorEventReceived = true; clearTimeout(watchdogTimer); }
+  let raw;
+  if(typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)){
+    raw = e.webkitCompassHeading;               // iOS: ya es rumbo real, 0=N, sentido horario
+  } else if(e.alpha !== null && e.alpha !== undefined){
+    raw = (360 - e.alpha) % 360;                 // Android/otros: alpha crece antihorario
+  } else {
+    return;
+  }
+  if(smoothedHeading===null){ smoothedHeading = raw; }
+  else{
+    const diff = (((raw - smoothedHeading) + 540) % 360) - 180;
+    smoothedHeading = (smoothedHeading + diff*0.25 + 360) % 360;
+  }
+  user.heading = smoothedHeading;
+  scheduleRender();
+}
+
+/* Doble listener de compatibilidad: deviceorientationabsolute (mejor en
+   Android, referencia absoluta al norte) con fallback a deviceorientation
+   (siempre disponible, incluido iOS vía webkitCompassHeading). */
+function startListening(){
+  window.addEventListener('deviceorientationabsolute', e=>{
+    receivedAbsolute = true;
+    handleOrientation(e);
+  }, true);
+  window.addEventListener('deviceorientation', e=>{
+    if(!receivedAbsolute) handleOrientation(e);
+  }, true);
+}
+
+async function enableSensors(){
+  hideSensorAlert();
+
+  if(!window.isSecureContext){
+    setSensorUI('error', BLOCKED_MSG);
+    return;
+  }
+  if(typeof DeviceOrientationEvent === 'undefined'){
+    setSensorUI('error', 'Este navegador no admite orientación del dispositivo. Ábrelo desde Safari (iOS) o Chrome (Android) en tu celular.');
+    return;
+  }
+
+  try{
+    // Solicitud explícita de permiso — debe dispararse dentro del onClick
+    // del botón (gesto del usuario), requisito de iOS 13+ / Safari.
+    if(typeof DeviceOrientationEvent.requestPermission === 'function'){
+      const resp = await DeviceOrientationEvent.requestPermission();
+      if(resp !== 'granted'){
+        setSensorUI('error', 'Permiso denegado. Actívalo en Ajustes → Safari → Movimiento y orientación, y vuelve a intentarlo.');
+        return;
+      }
+    }
+    if(!sensorsActive){ startListening(); sensorsActive = true; }
+    user.x = ENTRANCE.x; user.y = ENTRANCE.y;
+    arrived = false;
+    arrival.hidden = true;
+    sensorEventReceived = false;
+    setSensorUI('active');
+    armWatchdog();
+    render();
+  } catch(err){
+    setSensorUI('error', BLOCKED_MSG);
+  }
+}
+
+function checkTilt(){
+  const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+  tiltWarn.hidden = !(isLandscape && target);
+}
+window.addEventListener('resize', checkTilt);
+window.addEventListener('orientationchange', checkTilt);
+
+/* ---------------------------------------------------------------
+   Mini-mapa SVG (plano en U)
+------------------------------------------------------------------*/
+function drawMinimap(){
+  const svg = $('#minimapSvg');
+  const wallPts = "40,20 140,20 140,300 460,300 460,20 560,20 560,400 40,400";
+  const shelves = SHELVES.map(s=>{
+    const isTarget = target && s.id===target.id;
+    return `<circle cx="${s.x}" cy="${s.y}" r="${isTarget?13:8}"
+              fill="${isTarget?'var(--brass)':'#39435a'}"
+              stroke="${isTarget?'var(--brass)':'none'}" stroke-width="3" opacity="${isTarget?1:.9}"/>
+            <text x="${s.x}" y="${s.y+isTarget?4:3}" font-size="16" font-family="var(--font-mono)"
+              fill="${isTarget?'#0a0e14':'#c7cede'}" text-anchor="middle" dy="4" font-weight="700">${s.id.split('-')[1]}</text>`;
+  }).join('');
+
+  const trail = target ? `<line x1="${user.x}" y1="${user.y}" x2="${target.x}" y2="${target.y}"
+      stroke="var(--signal)" stroke-width="2" stroke-dasharray="4 6" opacity=".35"/>` : '';
+
+  const userMark = `
+    <g transform="translate(${user.x},${user.y}) rotate(${user.heading})">
+      <circle r="16" fill="var(--signal)" opacity=".18"/>
+      <path d="M0,-15 L9,10 L0,4 L-9,10 Z" fill="var(--signal)"/>
+    </g>`;
+
+  svg.innerHTML = `
+    <polygon points="${wallPts}" fill="#161d29" stroke="#333d50" stroke-width="4"/>
+    ${trail}
+    ${shelves}
+    ${userMark}
+  `;
+}
+
+/* ---------------------------------------------------------------
+   Eventos UI
+------------------------------------------------------------------*/
+function trySearch(){
+  const raw = $('#searchInput').value;
+  if(!raw.trim()) return;
+  const shelf = findShelf(raw);
+  if(shelf){ selectTarget(shelf); }
+  else { errMsg.hidden = false; }
+}
+$('#goBtn').addEventListener('click', trySearch);
+$('#searchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') trySearch(); });
+$('#sensorBtn').addEventListener('click', enableSensors);
+$('#arrivalReset').addEventListener('click', ()=>{
+  arrival.hidden = true; navUI.hidden = true; sensorBar.hidden = true; minimapWrap.hidden = true;
+  tiltWarn.hidden = true; emptyState.hidden = false; target = null; $('#searchInput').value=''; errMsg.hidden=true;
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+  $('#searchInput').focus();
+});
+
+/* Estado inicial: demo ya cargada con un ejemplo real de las instrucciones */
+buildChips();
+setSensorUI('inactive');
+selectTarget(SHELVES.find(s=>s.id==='E-2'));
+$('#searchInput').value = 'QA 76.73';
+</script>
