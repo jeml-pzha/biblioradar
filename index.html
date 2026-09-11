@@ -134,8 +134,9 @@
   .stage{
     flex:1; position:relative; display:flex; flex-direction:column;
     align-items:center; justify-content:flex-start;
-    padding:26px 18px 14px;
-    overflow:hidden;
+    padding:22px 18px 14px;
+    overflow-y:auto; overflow-x:hidden;
+    -webkit-overflow-scrolling:touch;
   }
   .empty-state{
     margin:auto; text-align:center; color:var(--ink-faint);
@@ -160,8 +161,30 @@
     font-size:12.5px; font-weight:700; padding:10px 14px; border-radius:14px; line-height:1.4;
   }
 
+  /* ---- Geofence banner: pops up when the user enters the stairs radius ---- */
+  .geofence-banner{
+    position:absolute; top:12px; left:12px; right:12px; z-index:35;
+    display:flex; align-items:center; gap:10px;
+    background:linear-gradient(135deg, var(--brass-soft), rgba(227,160,82,.3));
+    border:1px solid rgba(227,160,82,.55); border-radius:16px; padding:12px 12px;
+    box-shadow:0 14px 30px -10px rgba(0,0,0,.55);
+    cursor:pointer; text-align:left;
+    animation:geofenceIn .35s cubic-bezier(.2,.9,.3,1);
+  }
+  @keyframes geofenceIn{ from{opacity:0; transform:translateY(-14px) scale(.97)} to{opacity:1; transform:translateY(0) scale(1)} }
+  .geofence-icon{ font-size:22px; flex-shrink:0; animation:geofencePulse 1.6s ease-in-out infinite; }
+  @keyframes geofencePulse{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.18)} }
+  .geofence-copy{ flex:1; display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .geofence-copy strong{ font-size:12.5px; color:var(--brass); font-weight:800; line-height:1.35; }
+  .geofence-copy span{ font-size:11px; color:var(--ink-dim); font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .geofence-close{
+    flex-shrink:0; background:none; border:none; color:var(--ink-faint);
+    font-size:14px; padding:4px; cursor:pointer;
+  }
+  .geofence-close:hover{ color:var(--ink); }
+
   .radar-wrap{
-    position:relative; width:266px; height:266px; margin:26px 0 6px;
+    position:relative; width:224px; height:224px; margin:16px 0 4px; flex-shrink:0;
     display:flex; align-items:center; justify-content:center;
   }
   .radar-ring, .radar-ring-inner{
@@ -196,19 +219,15 @@
     display:flex; align-items:center; justify-content:center;
     box-shadow:0 8px 24px -8px rgba(0,0,0,.6);
   }
-  .center-hub{
-    position:absolute; width:8px; height:8px; border-radius:50%;
-    background:var(--ink); box-shadow:0 0 0 5px var(--bg);
-  }
   .dist-block{ text-align:center; margin-top:4px; }
   .dist-num{
-    font-family:var(--font-mono); font-weight:700; font-size:52px; line-height:1;
+    font-family:var(--font-mono); font-weight:700; font-size:46px; line-height:1;
     letter-spacing:-.02em;
   }
   .dist-num.step-flash{ animation:stepFlash .28s ease-out; }
   @keyframes stepFlash{ 0%{transform:scale(1.14)} 100%{transform:scale(1)} }
-  .center-hub.step-flash{ animation:hubFlash .28s ease-out; }
-  @keyframes hubFlash{ 0%{transform:scale(2.4); background:var(--good)} 100%{transform:scale(1); background:var(--ink)} }
+  .arrow-core.step-flash{ animation:coreFlash .28s ease-out; }
+  @keyframes coreFlash{ 0%{box-shadow:0 0 0 12px var(--good-soft)} 100%{box-shadow:0 8px 24px -8px rgba(0,0,0,.6)} }
   .dist-unit{ font-family:var(--font-mono); font-size:15px; color:var(--ink-dim); margin-top:4px;}
   .heading-readout{
     margin-top:10px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink-faint);
@@ -271,18 +290,76 @@
     font-size:10.5px; font-weight:700; padding:5px 11px; border-radius:99px; white-space:nowrap;
   }
 
-  /* ---- Mini-map overlay ---- */
-  .minimap{
-    position:absolute; right:16px; bottom:16px; z-index:20;
-    width:min(46vw, 208px); background:rgba(18,24,34,.92); backdrop-filter:blur(6px);
-    border:1px solid var(--line); border-radius:16px; padding:10px;
-    box-shadow:0 12px 30px -10px rgba(0,0,0,.6);
+  /* ---- Isometric 2.5D floor map: two stacked SVG planes under one CSS 3D
+     rotation. Lightweight — no 3D library, just transform + preserve-3d. ---- */
+  .iso-map{
+    position:relative; width:100%; margin-top:16px; flex-shrink:0;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:20px;
+    padding:14px 14px 18px;
+    box-shadow:0 18px 40px -20px rgba(0,0,0,.65);
   }
-  .minimap svg{ width:100%; height:auto; display:block; }
-  .minimap-label{
-    font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-dim);
-    font-weight:700; margin-bottom:6px; display:block; padding-left:2px;
+  .iso-map-head{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;
   }
+  .iso-map-label{
+    font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-dim); font-weight:700;
+  }
+  .iso-map-legend{ display:flex; gap:10px; font-size:9.5px; color:var(--ink-faint); font-weight:700; text-transform:uppercase; }
+  .iso-map-legend span{ display:inline-flex; align-items:center; gap:4px; }
+  .iso-map-legend i{ width:7px; height:7px; border-radius:2px; display:inline-block; }
+
+  .iso-stage{
+    position:relative; height:250px;
+    perspective:1000px; -webkit-perspective:1000px;
+  }
+  .iso-planes{
+    position:relative; width:100%; height:100%;
+    transform-style:preserve-3d; -webkit-transform-style:preserve-3d;
+    transform:translate3d(0,0,0) rotateX(50deg) rotateZ(-30deg);
+    will-change:transform;
+  }
+  .iso-plane{
+    position:absolute; inset:8%;
+    transform-style:preserve-3d; -webkit-transform-style:preserve-3d;
+    transition:opacity .4s ease, filter .4s ease;
+    border-radius:6px; overflow:visible;
+  }
+  #isoFloor1{ transform:translateZ(0px); }
+  #isoFloor2{ transform:translateZ(72px); }
+  .iso-plane.inactive{ opacity:.35; filter:saturate(.55) brightness(.7); }
+  .iso-plane.active{ opacity:1; filter:none; }
+  .iso-svg{ width:100%; height:100%; display:block; overflow:visible; }
+  .iso-floor-tag{
+    position:absolute; left:4%; top:2%; transform:translateZ(24px);
+    font-size:10.5px; font-weight:800; letter-spacing:.05em; color:var(--ink);
+    background:rgba(9,12,17,.75); padding:3px 9px; border-radius:7px; white-space:nowrap;
+  }
+  .iso-connector{
+    position:absolute; left:50%; top:88%; width:3px; height:76px;
+    background-image:linear-gradient(var(--brass) 55%, transparent 45%);
+    background-size:3px 11px;
+    transform:translateX(-50%) translateZ(36px);
+    transform-style:preserve-3d;
+    box-shadow:0 0 10px rgba(227,160,82,.55);
+    opacity:.85;
+  }
+
+  .iso-pin{
+    position:absolute; width:20px; height:20px; margin:-30px 0 0 -10px;
+    transform:translateZ(30px); transform-style:preserve-3d;
+    pointer-events:none;
+  }
+  .iso-pin::before{
+    content:''; position:absolute; inset:0; border-radius:50% 50% 50% 3px;
+    transform:rotate(-45deg); box-shadow:0 6px 14px -4px rgba(0,0,0,.6);
+  }
+  .iso-pin::after{
+    content:''; position:absolute; left:50%; top:46%; width:7px; height:7px;
+    background:var(--bg-2); border-radius:50%; transform:translate(-50%,-50%);
+  }
+  .iso-pin-target::before{ background:var(--brass); }
+  .iso-pin-user::before{ background:var(--signal); animation:isoUserPulse 1.8s ease-in-out infinite; }
+  @keyframes isoUserPulse{ 0%,100%{transform:rotate(-45deg) scale(1)} 50%{transform:rotate(-45deg) scale(1.18)} }
 
   /* ---- Arrival overlay ---- */
   .arrival{
@@ -311,7 +388,11 @@
     .pulse{ animation:none; opacity:.25; }
     .arrow-rotor{ transition:none; }
     .arrival{ animation:none; }
-    .dist-num.step-flash, .center-hub.step-flash{ animation:none; }
+    .dist-num.step-flash, .arrow-core.step-flash{ animation:none; }
+    .iso-pin-user::before{ animation:none; }
+    .geofence-icon{ animation:none; }
+    .geofence-banner{ animation:none; }
+    .iso-plane{ transition:none; }
   }
 </style>
 
@@ -354,6 +435,15 @@
 
       <div class="floor-alert" id="floorAlert" hidden>🪜 <span id="floorAlertText"></span></div>
 
+      <div class="geofence-banner" id="geofenceBanner" role="button" tabindex="0" hidden>
+        <span class="geofence-icon">🪜</span>
+        <div class="geofence-copy">
+          <strong id="geofenceText">Llegaste a las escaleras.</strong>
+          <span>Toca aquí para cambiar de piso</span>
+        </div>
+        <button class="geofence-close" id="geofenceClose" aria-label="Cerrar aviso">✕</button>
+      </div>
+
       <div class="radar-wrap">
         <div class="pulse"></div>
         <div class="radar-ring"></div>
@@ -361,12 +451,11 @@
         <div class="glow-disc"></div>
         <div class="arrow-rotor" id="arrowRotor">
           <div class="arrow-core">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-              <path d="M12 3.5 L18.5 18 L12 14.7 L5.5 18 Z" fill="currentColor" style="color:var(--prox,var(--signal))"/>
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2.4 L19.4 20.8 L12 16.5 L4.6 20.8 Z" fill="currentColor" style="color:var(--prox,var(--signal))"/>
             </svg>
           </div>
         </div>
-        <div class="center-hub"></div>
       </div>
 
       <div class="dist-block">
@@ -382,10 +471,32 @@
 
     <div class="tilt-warn" id="tiltWarn" hidden>📱 Mantén el teléfono en vertical</div>
 
-    <div class="minimap" id="minimapWrap" hidden>
-      <span class="minimap-label" id="minimapLabel">Plano · Piso 1</span>
-      <svg id="minimapSvg" viewBox="0 0 600 420"></svg>
-    </div>
+      <div class="iso-map">
+        <div class="iso-map-head">
+          <span class="iso-map-label">Plano isométrico · 2 niveles</span>
+          <div class="iso-map-legend">
+            <span><i style="background:var(--brass)"></i>Destino</span>
+            <span><i style="background:var(--signal)"></i>Tú</span>
+          </div>
+        </div>
+        <div class="iso-stage">
+          <div class="iso-planes" id="isoPlanes">
+            <div class="iso-connector"></div>
+            <div class="iso-plane" id="isoFloor2" data-floor="2">
+              <span class="iso-floor-tag">PISO 2</span>
+              <svg class="iso-svg" id="isoSvg2" viewBox="0 0 600 420"></svg>
+              <div class="iso-pin iso-pin-target" id="isoPinTarget2" hidden></div>
+              <div class="iso-pin iso-pin-user" id="isoPinUser2" hidden></div>
+            </div>
+            <div class="iso-plane" id="isoFloor1" data-floor="1">
+              <span class="iso-floor-tag">PISO 1</span>
+              <svg class="iso-svg" id="isoSvg1" viewBox="0 0 600 420"></svg>
+              <div class="iso-pin iso-pin-target" id="isoPinTarget1" hidden></div>
+              <div class="iso-pin iso-pin-user" id="isoPinUser1" hidden></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
     <!-- ARRIVAL -->
     <div class="arrival" id="arrival" hidden>
@@ -468,7 +579,7 @@ let arrived = false;
 
 const $ = sel => document.querySelector(sel);
 const stage=$('#stage'), emptyState=$('#emptyState'), navUI=$('#navUI'), sensorBar=$('#sensorBar'),
-      minimapWrap=$('#minimapWrap'), arrival=$('#arrival'), errMsg=$('#errMsg'), tiltWarn=$('#tiltWarn');
+      arrival=$('#arrival'), errMsg=$('#errMsg'), tiltWarn=$('#tiltWarn');
 
 function buildChips(){
   $('#chips').innerHTML = SHELVES.map(s=>
@@ -495,8 +606,8 @@ function selectTarget(shelf){
   emptyState.hidden = true;
   navUI.hidden = false;
   sensorBar.hidden = false;
-  minimapWrap.hidden = false;
   arrival.hidden = true;
+  geofenceDismissed = false;
   document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.id===shelf.id));
   checkTilt();
   render();
@@ -520,6 +631,48 @@ function bearing(){
   const p = navPoint();
   const dx=p.x-user.x, dy=p.y-user.y;
   return (Math.atan2(dx,-dy)*180/Math.PI + 360) % 360;
+}
+
+/* ---------------------------------------------------------------
+   Geofencing de escaleras: si el usuario (en el piso equivocado)
+   entra en un radio de 2m de la escalera, avisamos y ofrecemos
+   cambiar de planta — o lo hacemos solo si sigue caminando ahí.
+------------------------------------------------------------------*/
+const STAIRS_RADIUS_M = 2;
+const STEPS_TO_AUTO_SWITCH = 2; // pasos dentro del radio para asumir que ya subió/bajó
+
+let stepsInsideGeofence = 0;
+let geofenceDismissed = false;
+
+function stairsDistanceM(){
+  const st = FLOOR_PLANS[activeFloor].stairs;
+  const dx = st.x-user.x, dy = st.y-user.y;
+  return Math.sqrt(dx*dx+dy*dy)/SCALE;
+}
+
+function updateGeofenceBanner(){
+  const gEl = $('#geofenceBanner');
+  if(!target || !isCrossFloor()){
+    stepsInsideGeofence = 0; geofenceDismissed = false;
+    gEl.hidden = true;
+    return;
+  }
+  if(stairsDistanceM() <= STAIRS_RADIUS_M){
+    if(!geofenceDismissed){
+      $('#geofenceText').textContent = `Llegaste a las escaleras para ir al Piso ${target.floor}.`;
+      gEl.hidden = false;
+    }
+  } else {
+    stepsInsideGeofence = 0; geofenceDismissed = false;
+    gEl.hidden = true;
+  }
+}
+
+function confirmFloorChange(){
+  if(!target) return;
+  $('#geofenceBanner').hidden = true;
+  stepsInsideGeofence = 0; geofenceDismissed = false;
+  setFloor(target.floor);
 }
 
 let lastRel = null;
@@ -548,12 +701,12 @@ function render(){
   $('#headingRead').textContent = `RUMBO ${String(Math.round(user.heading)).padStart(3,'0')}°`;
   $('#bearingRead').textContent = `OBJETIVO ${String(Math.round(b)).padStart(3,'0')}°`;
 
+  // El banner fijo guía hacia la escalera; en cuanto entras en su radio (2m),
+  // el banner de geofencing (animado, con acción) toma el relevo — evita duplicar el aviso.
   const floorAlert = $('#floorAlert');
-  if(cf){
+  if(cf && m > STAIRS_RADIUS_M){
     floorAlert.hidden = false;
-    $('#floorAlertText').textContent = m < 1
-      ? `Ya estás en la escalera. Sube o baja al Piso ${target.floor} y toca el botón de piso arriba.`
-      : `El recurso está en el Piso ${target.floor}. Dirígete a las escaleras.`;
+    $('#floorAlertText').textContent = `El recurso está en el Piso ${target.floor}. Dirígete a las escaleras.`;
   } else {
     floorAlert.hidden = true;
   }
@@ -566,7 +719,10 @@ function render(){
   stage.dataset.prox = prox;
   $('#statusPill').textContent = pill;
 
-  drawMinimap();
+  updateGeofenceBanner();
+  renderIsoFloor(1);
+  renderIsoFloor(2);
+  updateIsoMap();
 
   if(m < 1 && !cf && !arrived){
     arrived = true;
@@ -680,8 +836,8 @@ let lastStepTime = 0;
 let abovePeak = false;
 
 function flashStep(){
-  const dist = $('#distNum'), hub = $('.center-hub');
-  [dist, hub].forEach(el=>{ el.classList.remove('step-flash'); void el.offsetWidth; el.classList.add('step-flash'); });
+  const dist = $('#distNum'), core = $('.arrow-core');
+  [dist, core].forEach(el=>{ el.classList.remove('step-flash'); void el.offsetWidth; el.classList.add('step-flash'); });
   if(navigator.vibrate) navigator.vibrate(50);
 }
 
@@ -695,6 +851,17 @@ function registerStep(){
   stepCount++;
   $('#stepRead').textContent = `PASOS ${stepCount}`;
   flashStep();
+
+  // Geofencing: si seguimos caminando dentro del radio de la escalera del
+  // piso equivocado, interpretamos que el usuario ya subió/bajó y cambiamos
+  // de planta automáticamente tras unos pasos en la zona.
+  if(target && isCrossFloor() && stairsDistanceM() <= STAIRS_RADIUS_M){
+    stepsInsideGeofence++;
+    if(stepsInsideGeofence >= STEPS_TO_AUTO_SWITCH){
+      confirmFloorChange();
+      return;
+    }
+  }
   scheduleRender();
 }
 
@@ -760,6 +927,8 @@ async function enableSensors(){
     stepCount = 0;
     gravityBaseline = 9.8;
     abovePeak = false;
+    stepsInsideGeofence = 0;
+    geofenceDismissed = false;
     $('#stepRead').textContent = 'PASOS 0';
     setSensorUI('active');
     armWatchdog();
@@ -777,59 +946,83 @@ window.addEventListener('resize', checkTilt);
 window.addEventListener('orientationchange', checkTilt);
 
 /* ---------------------------------------------------------------
-   Mini-mapa SVG — un plano distinto por piso, según activeFloor
+   Mapa isométrico 2.5D — dos plantas SVG planas apiladas dentro de
+   un mismo contenedor con rotateX/rotateZ (CSS 3D puro, sin libs).
+   El piso activo se dibuja "iluminado"; el otro, atenuado.
 ------------------------------------------------------------------*/
-function drawMinimap(){
-  const svg = $('#minimapSvg');
-  const plan = FLOOR_PLANS[activeFloor];
+function renderIsoFloor(floorNum){
+  const svg = $(floorNum===1 ? '#isoSvg1' : '#isoSvg2');
+  const plan = FLOOR_PLANS[floorNum];
   const cf = isCrossFloor();
-  const floorShelves = SHELVES.filter(s=>s.floor===activeFloor);
+  const isActive = floorNum===activeFloor;
+  const floorShelves = SHELVES.filter(s=>s.floor===floorNum);
 
   const shelves = floorShelves.map(s=>{
-    const isTarget = target && !cf && s.id===target.id;
-    return `<circle cx="${s.x}" cy="${s.y}" r="${isTarget?13:8}"
-              fill="${isTarget?'var(--brass)':'#39435a'}"
-              stroke="${isTarget?'var(--brass)':'none'}" stroke-width="3" opacity="${isTarget?1:.9}"/>
-            <text x="${s.x}" y="${s.y+isTarget?4:3}" font-size="16" font-family="var(--font-mono)"
-              fill="${isTarget?'#0a0e14':'#c7cede'}" text-anchor="middle" dy="4" font-weight="700">${s.id.split('-')[1]}</text>`;
+    const isTarget = target && s.id===target.id;
+    return `<circle cx="${s.x}" cy="${s.y}" r="${isTarget?16:10}"
+              fill="${isTarget?'var(--brass)':'#3a4457'}"
+              stroke="${isTarget?'var(--brass)':'none'}" stroke-width="3"/>
+            <text x="${s.x}" y="${s.y}" dy="6" font-size="18" font-family="var(--font-mono)"
+              fill="${isTarget?'#0a0e14':'#c9d0e0'}" text-anchor="middle" font-weight="700">${s.id.split('-')[1]}</text>`;
   }).join('');
 
+  const stairsHi = cf && isActive;
   const stairsMark = `
     <g transform="translate(${plan.stairs.x},${plan.stairs.y})">
-      <rect x="-17" y="-17" width="34" height="34" rx="9"
-        fill="${cf?'var(--brass)':'#39435a'}" stroke="${cf?'var(--brass)':'none'}" stroke-width="3" opacity="${cf?1:.9}"/>
-      <text y="5" font-size="13" font-family="var(--font-mono)" font-weight="700" text-anchor="middle"
-        fill="${cf?'#0a0e14':'#c7cede'}">ESC</text>
+      <rect x="-20" y="-20" width="40" height="40" rx="10"
+        fill="${stairsHi?'var(--brass)':'#3a4457'}" stroke="${stairsHi?'var(--brass)':'none'}" stroke-width="3"/>
+      <text y="6" font-size="14" font-family="var(--font-mono)" font-weight="700" text-anchor="middle"
+        fill="${stairsHi?'#0a0e14':'#c9d0e0'}">ESC</text>
     </g>`;
 
-  const navP = navPoint();
-  const trail = navP ? `<line x1="${user.x}" y1="${user.y}" x2="${navP.x}" y2="${navP.y}"
-      stroke="var(--signal)" stroke-width="2" stroke-dasharray="4 6" opacity=".35"/>` : '';
-
-  const userMark = `
-    <g transform="translate(${user.x},${user.y}) rotate(${user.heading})">
-      <circle r="16" fill="var(--signal)" opacity=".18"/>
-      <path d="M0,-15 L9,10 L0,4 L-9,10 Z" fill="var(--signal)"/>
-    </g>`;
+  let trail = '';
+  if(isActive && target){
+    const np = navPoint();
+    trail = `<line x1="${user.x}" y1="${user.y}" x2="${np.x}" y2="${np.y}"
+        stroke="var(--signal)" stroke-width="4" stroke-dasharray="8 10" opacity=".45"/>`;
+  }
 
   svg.innerHTML = `
-    <polygon points="${plan.wall}" fill="#161d29" stroke="#333d50" stroke-width="4"/>
+    <polygon points="${plan.wall}" fill="${isActive?'#1b2434':'#131924'}" stroke="${isActive?'#3d4a63':'#242c3a'}" stroke-width="5"/>
     ${trail}
     ${shelves}
     ${stairsMark}
-    ${userMark}
   `;
+}
+
+function updateIsoMap(){
+  const f1 = $('#isoFloor1'), f2 = $('#isoFloor2');
+  f1.classList.toggle('active', activeFloor===1);
+  f1.classList.toggle('inactive', activeFloor!==1);
+  f2.classList.toggle('active', activeFloor===2);
+  f2.classList.toggle('inactive', activeFloor!==2);
+
+  const userPin1 = $('#isoPinUser1'), userPin2 = $('#isoPinUser2');
+  userPin1.hidden = activeFloor!==1;
+  userPin2.hidden = activeFloor!==2;
+  const activeUserPin = activeFloor===1 ? userPin1 : userPin2;
+  activeUserPin.style.left = (user.x/600*100) + '%';
+  activeUserPin.style.top = (user.y/420*100) + '%';
+
+  const tPin1 = $('#isoPinTarget1'), tPin2 = $('#isoPinTarget2');
+  tPin1.hidden = true; tPin2.hidden = true;
+  if(target){
+    const pin = target.floor===1 ? tPin1 : tPin2;
+    pin.hidden = false;
+    pin.style.left = (target.x/600*100) + '%';
+    pin.style.top = (target.y/420*100) + '%';
+  }
 }
 
 function setFloor(f){
   if(f === activeFloor) return;
   activeFloor = f;
   document.querySelectorAll('.floor-btn').forEach(b=> b.classList.toggle('active', Number(b.dataset.floor)===f));
-  $('#minimapLabel').textContent = `Plano · Piso ${f}`;
   user.x = ENTRANCE.x; user.y = ENTRANCE.y; // nueva planta = nuevo marco de referencia espacial
   lastRel = null;
+  stepsInsideGeofence = 0; geofenceDismissed = false;
   checkTilt();
-  if(target) render();
+  if(target) render(); else { renderIsoFloor(1); renderIsoFloor(2); updateIsoMap(); }
 }
 document.querySelectorAll('.floor-btn').forEach(b=>
   b.addEventListener('click', ()=> setFloor(Number(b.dataset.floor)))
@@ -848,10 +1041,21 @@ function trySearch(){
 $('#goBtn').addEventListener('click', trySearch);
 $('#searchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') trySearch(); });
 $('#sensorBtn').addEventListener('click', enableSensors);
+$('#geofenceBanner').addEventListener('click', e=>{
+  if(e.target.closest('#geofenceClose')) return;
+  confirmFloorChange();
+});
+$('#geofenceBanner').addEventListener('keydown', e=>{ if(e.key==='Enter') confirmFloorChange(); });
+$('#geofenceClose').addEventListener('click', e=>{
+  e.stopPropagation();
+  geofenceDismissed = true;
+  $('#geofenceBanner').hidden = true;
+});
 $('#arrivalReset').addEventListener('click', ()=>{
-  arrival.hidden = true; navUI.hidden = true; sensorBar.hidden = true; minimapWrap.hidden = true;
-  tiltWarn.hidden = true; $('#floorAlert').hidden = true;
+  arrival.hidden = true; navUI.hidden = true; sensorBar.hidden = true;
+  tiltWarn.hidden = true; $('#floorAlert').hidden = true; $('#geofenceBanner').hidden = true;
   emptyState.hidden = false; target = null; $('#searchInput').value=''; errMsg.hidden=true;
+  stepsInsideGeofence = 0; geofenceDismissed = false;
   document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
   $('#searchInput').focus();
 });
