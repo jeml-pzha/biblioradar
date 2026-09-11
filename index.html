@@ -76,6 +76,19 @@
     border:1px solid rgba(227,160,82,.35);
     padding:3px 8px; border-radius:99px; font-weight:700;
   }
+  .floor-toggle{
+    margin-top:12px; display:flex; gap:4px;
+    background:var(--surface-2); border:1px solid var(--line);
+    border-radius:12px; padding:4px;
+  }
+  .floor-btn{
+    flex:1; background:transparent; border:none; color:var(--ink-faint);
+    font-size:13px; font-weight:700; padding:9px 0; border-radius:9px; cursor:pointer;
+    transition:background-color .15s, color .15s;
+  }
+  .floor-btn.active{ background:var(--signal-soft); color:var(--signal); }
+  .floor-btn:not(.active):hover{ color:var(--ink-dim); }
+
   .search-row{
     margin-top:12px;
     display:flex; align-items:center; gap:8px;
@@ -140,6 +153,12 @@
   }
   .target-line .code{font-family:var(--font-mono); font-size:13px; color:var(--ink-dim)}
   .target-line .subject{font-size:17px; font-weight:800; margin-top:2px}
+
+  .floor-alert{
+    margin-top:12px; max-width:280px; text-align:center;
+    background:var(--brass-soft); border:1px solid rgba(227,160,82,.4); color:var(--brass);
+    font-size:12.5px; font-weight:700; padding:10px 14px; border-radius:14px; line-height:1.4;
+  }
 
   .radar-wrap{
     position:relative; width:266px; height:266px; margin:26px 0 6px;
@@ -303,6 +322,10 @@
       <span class="eyebrow">BiblioRadar · Sala General</span>
       <span class="badge-sim">● Sensor real</span>
     </div>
+    <div class="floor-toggle" id="floorToggle">
+      <button class="floor-btn active" data-floor="1">Piso 1</button>
+      <button class="floor-btn" data-floor="2">Piso 2</button>
+    </div>
     <div class="search-row">
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5b6478" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="searchInput" type="text" placeholder="Signatura, ej. HG 4022" autocomplete="off" spellcheck="false">
@@ -329,6 +352,8 @@
         <div class="subject" id="targetSubject">Informática</div>
       </div>
 
+      <div class="floor-alert" id="floorAlert" hidden>🪜 <span id="floorAlertText"></span></div>
+
       <div class="radar-wrap">
         <div class="pulse"></div>
         <div class="radar-ring"></div>
@@ -346,7 +371,7 @@
 
       <div class="dist-block">
         <div class="dist-num tabular" id="distNum">18</div>
-        <div class="dist-unit">METROS AL ESTANTE</div>
+        <div class="dist-unit" id="distUnit">METROS AL ESTANTE</div>
       </div>
       <div class="heading-readout tabular">
         <span id="headingRead">RUMBO 000°</span>
@@ -358,7 +383,7 @@
     <div class="tilt-warn" id="tiltWarn" hidden>📱 Mantén el teléfono en vertical</div>
 
     <div class="minimap" id="minimapWrap" hidden>
-      <span class="minimap-label">Plano · Sala U</span>
+      <span class="minimap-label" id="minimapLabel">Plano · Piso 1</span>
       <svg id="minimapSvg" viewBox="0 0 600 420"></svg>
     </div>
 
@@ -390,17 +415,29 @@
 
 <script>
 /* ---------------------------------------------------------------
-   data.js — fondo simulado: 6 estantes ubicados en un plano en U
-   (viewBox 0 0 600 420). Cada rango combina notación LCC/Dewey.
+   data.js — fondo simulado: 9 estantes en 2 plantas (floor:1 / floor:2).
+   Cada uno trae su propio plano en U (viewBox 0 0 600 420) y rango LCC/Dewey.
 ------------------------------------------------------------------*/
 const SHELVES = [
-  { id:'E-1', class:'PN', start:1990,   end:1999,   subject:'Cine y medios',        x:70,  y:60  },
-  { id:'E-2', class:'QA', start:75,     end:76.99,  subject:'Informática',          x:70,  y:180 },
-  { id:'E-3', class:'TK', start:5101,   end:5991,   subject:'Telecomunicaciones',   x:150, y:340 },
-  { id:'E-4', class:'HG', start:4001,   end:4500,   subject:'Finanzas',             x:450, y:300 },
-  { id:'E-5', class:'DP', start:1,      end:402,    subject:'Historia de España',   x:530, y:170 },
-  { id:'E-6', class:'ND', start:1990,   end:3416,   subject:'Pintura',              x:530, y:60  },
+  { id:'E-1', floor:1, class:'PN', start:1990,   end:1999,   subject:'Cine y medios',              x:70,  y:60  },
+  { id:'E-2', floor:1, class:'QA', start:75,     end:76.99,  subject:'Informática',                x:70,  y:180 },
+  { id:'E-3', floor:1, class:'TK', start:5101,   end:5991,   subject:'Telecomunicaciones',         x:150, y:340 },
+  { id:'E-4', floor:1, class:'HG', start:4001,   end:4500,   subject:'Finanzas',                   x:450, y:300 },
+  { id:'E-5', floor:1, class:'DP', start:1,      end:402,    subject:'Historia de España',         x:530, y:170 },
+  { id:'E-6', floor:1, class:'ND', start:1990,   end:3416,   subject:'Pintura',                    x:530, y:60  },
+  { id:'E-7', floor:2, class:'PQ', start:2001,   end:2999,   subject:'Literatura románica',        x:150, y:110 },
+  { id:'E-8', floor:2, class:'BF', start:1,      end:990,    subject:'Psicología',                 x:300, y:280 },
+  { id:'E-9', floor:2, class:'GV', start:1000,   end:1198,   subject:'Deportes y recreación',      x:460, y:110 },
 ];
+
+// Plano físico por piso: contorno de paredes + punto de transición (escalera).
+// La escalera comparte la misma columna (x,y) en ambos pisos: es el mismo hueco vertical.
+const FLOOR_PLANS = {
+  1: { wall:"40,20 140,20 140,300 460,300 460,20 560,20 560,400 40,400", stairs:{x:300,y:380} },
+  2: { wall:"40,20 560,20 560,400 40,400",                                stairs:{x:300,y:380} },
+};
+
+let activeFloor = 1;
 
 const ENTRANCE = { x:250, y:335, heading:0 };
 const SCALE = 14;      // px por metro
@@ -435,7 +472,7 @@ const stage=$('#stage'), emptyState=$('#emptyState'), navUI=$('#navUI'), sensorB
 
 function buildChips(){
   $('#chips').innerHTML = SHELVES.map(s=>
-    `<button class="chip" data-id="${s.id}"><b>${rangeLabel(s)}</b> · ${s.subject}</button>`
+    `<button class="chip" data-id="${s.id}"><b>P${s.floor} · ${rangeLabel(s)}</b> · ${s.subject}</button>`
   ).join('');
   document.querySelectorAll('.chip').forEach(c=>{
     c.addEventListener('click', ()=>{
@@ -465,12 +502,23 @@ function selectTarget(shelf){
   render();
 }
 
+// Si el objetivo está en otro piso, navegamos hacia la escalera de ESTE piso
+// en lugar del estante — el estante mismo no es alcanzable hasta cambiar de nivel.
+function isCrossFloor(){
+  return !!target && target.floor !== activeFloor;
+}
+function navPoint(){
+  if(!target) return null;
+  return isCrossFloor() ? FLOOR_PLANS[activeFloor].stairs : { x:target.x, y:target.y };
+}
 function dist(){
-  const dx=target.x-user.x, dy=target.y-user.y;
+  const p = navPoint();
+  const dx=p.x-user.x, dy=p.y-user.y;
   return Math.sqrt(dx*dx+dy*dy)/SCALE;
 }
 function bearing(){
-  const dx=target.x-user.x, dy=target.y-user.y;
+  const p = navPoint();
+  const dx=p.x-user.x, dy=p.y-user.y;
   return (Math.atan2(dx,-dy)*180/Math.PI + 360) % 360;
 }
 
@@ -490,26 +538,39 @@ function render(){
   const b = bearing();
   const rel = (b - user.heading + 360) % 360;
 
-  $('#targetCode').textContent = `${target.id} · ${rangeLabel(target)}`;
+  const cf = isCrossFloor();
+
+  $('#targetCode').textContent = `${target.id} · P${target.floor} · ${rangeLabel(target)}`;
   $('#targetSubject').textContent = target.subject;
   applyArrowRotation(rel);
   $('#distNum').textContent = m < 1 ? m.toFixed(1) : Math.round(m);
+  $('#distUnit').textContent = cf ? 'METROS A LA ESCALERA' : 'METROS AL ESTANTE';
   $('#headingRead').textContent = `RUMBO ${String(Math.round(user.heading)).padStart(3,'0')}°`;
   $('#bearingRead').textContent = `OBJETIVO ${String(Math.round(b)).padStart(3,'0')}°`;
 
-  let prox='far', pill='Buscando estante';
+  const floorAlert = $('#floorAlert');
+  if(cf){
+    floorAlert.hidden = false;
+    $('#floorAlertText').textContent = m < 1
+      ? `Ya estás en la escalera. Sube o baja al Piso ${target.floor} y toca el botón de piso arriba.`
+      : `El recurso está en el Piso ${target.floor}. Dirígete a las escaleras.`;
+  } else {
+    floorAlert.hidden = true;
+  }
+
+  let prox='far', pill = cf ? 'Ve a la escalera' : 'Buscando estante';
   if(m<1){ prox='close'; }
-  else if(m<3){ prox='close'; pill='¡Casi llegas!'; }
-  else if(m<8){ prox='near'; pill='Te estás acercando'; }
-  else { prox='far'; pill='Sigue la flecha'; }
+  else if(m<3){ prox='close'; pill = cf ? 'Casi llegas a la escalera' : '¡Casi llegas!'; }
+  else if(m<8){ prox='near'; pill = cf ? 'Acércate a la escalera' : 'Te estás acercando'; }
+  else { prox='far'; }
   stage.dataset.prox = prox;
   $('#statusPill').textContent = pill;
 
   drawMinimap();
 
-  if(m < 1 && !arrived){
+  if(m < 1 && !cf && !arrived){
     arrived = true;
-    $('#arrivalCode').textContent = `${target.id} · ${rangeLabel(target)}`;
+    $('#arrivalCode').textContent = `${target.id} · P${target.floor} · ${rangeLabel(target)}`;
     $('#arrivalSubject').textContent = target.subject;
     arrival.hidden = false;
   }
@@ -716,13 +777,16 @@ window.addEventListener('resize', checkTilt);
 window.addEventListener('orientationchange', checkTilt);
 
 /* ---------------------------------------------------------------
-   Mini-mapa SVG (plano en U)
+   Mini-mapa SVG — un plano distinto por piso, según activeFloor
 ------------------------------------------------------------------*/
 function drawMinimap(){
   const svg = $('#minimapSvg');
-  const wallPts = "40,20 140,20 140,300 460,300 460,20 560,20 560,400 40,400";
-  const shelves = SHELVES.map(s=>{
-    const isTarget = target && s.id===target.id;
+  const plan = FLOOR_PLANS[activeFloor];
+  const cf = isCrossFloor();
+  const floorShelves = SHELVES.filter(s=>s.floor===activeFloor);
+
+  const shelves = floorShelves.map(s=>{
+    const isTarget = target && !cf && s.id===target.id;
     return `<circle cx="${s.x}" cy="${s.y}" r="${isTarget?13:8}"
               fill="${isTarget?'var(--brass)':'#39435a'}"
               stroke="${isTarget?'var(--brass)':'none'}" stroke-width="3" opacity="${isTarget?1:.9}"/>
@@ -730,7 +794,16 @@ function drawMinimap(){
               fill="${isTarget?'#0a0e14':'#c7cede'}" text-anchor="middle" dy="4" font-weight="700">${s.id.split('-')[1]}</text>`;
   }).join('');
 
-  const trail = target ? `<line x1="${user.x}" y1="${user.y}" x2="${target.x}" y2="${target.y}"
+  const stairsMark = `
+    <g transform="translate(${plan.stairs.x},${plan.stairs.y})">
+      <rect x="-17" y="-17" width="34" height="34" rx="9"
+        fill="${cf?'var(--brass)':'#39435a'}" stroke="${cf?'var(--brass)':'none'}" stroke-width="3" opacity="${cf?1:.9}"/>
+      <text y="5" font-size="13" font-family="var(--font-mono)" font-weight="700" text-anchor="middle"
+        fill="${cf?'#0a0e14':'#c7cede'}">ESC</text>
+    </g>`;
+
+  const navP = navPoint();
+  const trail = navP ? `<line x1="${user.x}" y1="${user.y}" x2="${navP.x}" y2="${navP.y}"
       stroke="var(--signal)" stroke-width="2" stroke-dasharray="4 6" opacity=".35"/>` : '';
 
   const userMark = `
@@ -740,12 +813,27 @@ function drawMinimap(){
     </g>`;
 
   svg.innerHTML = `
-    <polygon points="${wallPts}" fill="#161d29" stroke="#333d50" stroke-width="4"/>
+    <polygon points="${plan.wall}" fill="#161d29" stroke="#333d50" stroke-width="4"/>
     ${trail}
     ${shelves}
+    ${stairsMark}
     ${userMark}
   `;
 }
+
+function setFloor(f){
+  if(f === activeFloor) return;
+  activeFloor = f;
+  document.querySelectorAll('.floor-btn').forEach(b=> b.classList.toggle('active', Number(b.dataset.floor)===f));
+  $('#minimapLabel').textContent = `Plano · Piso ${f}`;
+  user.x = ENTRANCE.x; user.y = ENTRANCE.y; // nueva planta = nuevo marco de referencia espacial
+  lastRel = null;
+  checkTilt();
+  if(target) render();
+}
+document.querySelectorAll('.floor-btn').forEach(b=>
+  b.addEventListener('click', ()=> setFloor(Number(b.dataset.floor)))
+);
 
 /* ---------------------------------------------------------------
    Eventos UI
@@ -762,7 +850,8 @@ $('#searchInput').addEventListener('keydown', e=>{ if(e.key==='Enter') trySearch
 $('#sensorBtn').addEventListener('click', enableSensors);
 $('#arrivalReset').addEventListener('click', ()=>{
   arrival.hidden = true; navUI.hidden = true; sensorBar.hidden = true; minimapWrap.hidden = true;
-  tiltWarn.hidden = true; emptyState.hidden = false; target = null; $('#searchInput').value=''; errMsg.hidden=true;
+  tiltWarn.hidden = true; $('#floorAlert').hidden = true;
+  emptyState.hidden = false; target = null; $('#searchInput').value=''; errMsg.hidden=true;
   document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
   $('#searchInput').focus();
 });
