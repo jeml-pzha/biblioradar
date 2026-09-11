@@ -4,6 +4,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
   /* ---- Tokens: deliberate single dark "instrument" theme (radar/locator device) ---- */
   :root{
@@ -290,8 +291,7 @@
     font-size:10.5px; font-weight:700; padding:5px 11px; border-radius:99px; white-space:nowrap;
   }
 
-  /* ---- Isometric 2.5D floor map: two stacked SVG planes under one CSS 3D
-     rotation. Lightweight — no 3D library, just transform + preserve-3d. ---- */
+  /* ---- Native 3D floor map: real Three.js/WebGL scene, low-poly, ---- */
   .iso-map{
     position:relative; width:100%; margin-top:16px; flex-shrink:0;
     background:var(--surface-2); border:1px solid var(--line); border-radius:20px;
@@ -308,58 +308,11 @@
   .iso-map-legend span{ display:inline-flex; align-items:center; gap:4px; }
   .iso-map-legend i{ width:7px; height:7px; border-radius:2px; display:inline-block; }
 
-  .iso-stage{
-    position:relative; height:250px;
-    perspective:1000px; -webkit-perspective:1000px;
+  .iso-canvas-wrap{
+    position:relative; width:100%; height:250px;
+    border-radius:14px; overflow:hidden; background:#0d1219;
   }
-  .iso-planes{
-    position:relative; width:100%; height:100%;
-    transform-style:preserve-3d; -webkit-transform-style:preserve-3d;
-    transform:translate3d(0,0,0) rotateX(50deg) rotateZ(-30deg);
-    will-change:transform;
-  }
-  .iso-plane{
-    position:absolute; inset:8%;
-    transform-style:preserve-3d; -webkit-transform-style:preserve-3d;
-    transition:opacity .4s ease, filter .4s ease;
-    border-radius:6px; overflow:visible;
-  }
-  #isoFloor1{ transform:translateZ(0px); }
-  #isoFloor2{ transform:translateZ(72px); }
-  .iso-plane.inactive{ opacity:.35; filter:saturate(.55) brightness(.7); }
-  .iso-plane.active{ opacity:1; filter:none; }
-  .iso-svg{ width:100%; height:100%; display:block; overflow:visible; }
-  .iso-floor-tag{
-    position:absolute; left:4%; top:2%; transform:translateZ(24px);
-    font-size:10.5px; font-weight:800; letter-spacing:.05em; color:var(--ink);
-    background:rgba(9,12,17,.75); padding:3px 9px; border-radius:7px; white-space:nowrap;
-  }
-  .iso-connector{
-    position:absolute; left:50%; top:88%; width:3px; height:76px;
-    background-image:linear-gradient(var(--brass) 55%, transparent 45%);
-    background-size:3px 11px;
-    transform:translateX(-50%) translateZ(36px);
-    transform-style:preserve-3d;
-    box-shadow:0 0 10px rgba(227,160,82,.55);
-    opacity:.85;
-  }
-
-  .iso-pin{
-    position:absolute; width:20px; height:20px; margin:-30px 0 0 -10px;
-    transform:translateZ(30px); transform-style:preserve-3d;
-    pointer-events:none;
-  }
-  .iso-pin::before{
-    content:''; position:absolute; inset:0; border-radius:50% 50% 50% 3px;
-    transform:rotate(-45deg); box-shadow:0 6px 14px -4px rgba(0,0,0,.6);
-  }
-  .iso-pin::after{
-    content:''; position:absolute; left:50%; top:46%; width:7px; height:7px;
-    background:var(--bg-2); border-radius:50%; transform:translate(-50%,-50%);
-  }
-  .iso-pin-target::before{ background:var(--brass); }
-  .iso-pin-user::before{ background:var(--signal); animation:isoUserPulse 1.8s ease-in-out infinite; }
-  @keyframes isoUserPulse{ 0%,100%{transform:rotate(-45deg) scale(1)} 50%{transform:rotate(-45deg) scale(1.18)} }
+  #threeCanvas{ width:100%; height:100%; display:block; touch-action:none; }
 
   /* ---- Arrival overlay ---- */
   .arrival{
@@ -389,10 +342,8 @@
     .arrow-rotor{ transition:none; }
     .arrival{ animation:none; }
     .dist-num.step-flash, .arrow-core.step-flash{ animation:none; }
-    .iso-pin-user::before{ animation:none; }
     .geofence-icon{ animation:none; }
     .geofence-banner{ animation:none; }
-    .iso-plane{ transition:none; }
   }
 </style>
 
@@ -479,22 +430,8 @@
             <span><i style="background:var(--signal)"></i>Tú</span>
           </div>
         </div>
-        <div class="iso-stage">
-          <div class="iso-planes" id="isoPlanes">
-            <div class="iso-connector"></div>
-            <div class="iso-plane" id="isoFloor2" data-floor="2">
-              <span class="iso-floor-tag">PISO 2</span>
-              <svg class="iso-svg" id="isoSvg2" viewBox="0 0 600 420"></svg>
-              <div class="iso-pin iso-pin-target" id="isoPinTarget2" hidden></div>
-              <div class="iso-pin iso-pin-user" id="isoPinUser2" hidden></div>
-            </div>
-            <div class="iso-plane" id="isoFloor1" data-floor="1">
-              <span class="iso-floor-tag">PISO 1</span>
-              <svg class="iso-svg" id="isoSvg1" viewBox="0 0 600 420"></svg>
-              <div class="iso-pin iso-pin-target" id="isoPinTarget1" hidden></div>
-              <div class="iso-pin iso-pin-user" id="isoPinUser1" hidden></div>
-            </div>
-          </div>
+        <div class="iso-canvas-wrap" id="threeCanvasWrap">
+          <canvas id="threeCanvas"></canvas>
         </div>
       </div>
 
@@ -655,9 +592,12 @@ function updateGeofenceBanner(){
   if(!target || !isCrossFloor()){
     stepsInsideGeofence = 0; geofenceDismissed = false;
     gEl.hidden = true;
+    setCameraTilt3(false);
     return;
   }
-  if(stairsDistanceM() <= STAIRS_RADIUS_M){
+  const inRadius = stairsDistanceM() <= STAIRS_RADIUS_M;
+  setCameraTilt3(inRadius); // acerca/inclina suavemente la cámara 3D hacia el piso destino
+  if(inRadius){
     if(!geofenceDismissed){
       $('#geofenceText').textContent = `Llegaste a las escaleras para ir al Piso ${target.floor}.`;
       gEl.hidden = false;
@@ -720,9 +660,8 @@ function render(){
   $('#statusPill').textContent = pill;
 
   updateGeofenceBanner();
-  renderIsoFloor(1);
-  renderIsoFloor(2);
-  updateIsoMap();
+  updateSceneHighlights3();
+  updateUserMarker3();
 
   if(m < 1 && !cf && !arrived){
     arrived = true;
@@ -946,72 +885,203 @@ window.addEventListener('resize', checkTilt);
 window.addEventListener('orientationchange', checkTilt);
 
 /* ---------------------------------------------------------------
-   Mapa isométrico 2.5D — dos plantas SVG planas apiladas dentro de
-   un mismo contenedor con rotateX/rotateZ (CSS 3D puro, sin libs).
-   El piso activo se dibuja "iluminado"; el otro, atenuado.
+   Mapa 3D nativo — escena Three.js real (WebGL), low-poly, dos
+   plantas como BoxGeometry separadas en Y. Sin sombras dinámicas,
+   sin loop continuo: renderiza solo cuando algo cambia (render-on-demand).
 ------------------------------------------------------------------*/
-function renderIsoFloor(floorNum){
-  const svg = $(floorNum===1 ? '#isoSvg1' : '#isoSvg2');
-  const plan = FLOOR_PLANS[floorNum];
-  const cf = isCrossFloor();
-  const isActive = floorNum===activeFloor;
-  const floorShelves = SHELVES.filter(s=>s.floor===floorNum);
+const SVG_TO_3D = 1/20;      // escala: unidades del viewBox (600x420) -> unidades 3D
+const FLOOR_GAP = 6.4;       // separación vertical entre plantas
+const SLAB_THICK = 0.6;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const shelves = floorShelves.map(s=>{
-    const isTarget = target && s.id===target.id;
-    return `<circle cx="${s.x}" cy="${s.y}" r="${isTarget?16:10}"
-              fill="${isTarget?'var(--brass)':'#3a4457'}"
-              stroke="${isTarget?'var(--brass)':'none'}" stroke-width="3"/>
-            <text x="${s.x}" y="${s.y}" dy="6" font-size="18" font-family="var(--font-mono)"
-              fill="${isTarget?'#0a0e14':'#c9d0e0'}" text-anchor="middle" font-weight="700">${s.id.split('-')[1]}</text>`;
-  }).join('');
-
-  const stairsHi = cf && isActive;
-  const stairsMark = `
-    <g transform="translate(${plan.stairs.x},${plan.stairs.y})">
-      <rect x="-20" y="-20" width="40" height="40" rx="10"
-        fill="${stairsHi?'var(--brass)':'#3a4457'}" stroke="${stairsHi?'var(--brass)':'none'}" stroke-width="3"/>
-      <text y="6" font-size="14" font-family="var(--font-mono)" font-weight="700" text-anchor="middle"
-        fill="${stairsHi?'#0a0e14':'#c9d0e0'}">ESC</text>
-    </g>`;
-
-  let trail = '';
-  if(isActive && target){
-    const np = navPoint();
-    trail = `<line x1="${user.x}" y1="${user.y}" x2="${np.x}" y2="${np.y}"
-        stroke="var(--signal)" stroke-width="4" stroke-dasharray="8 10" opacity=".45"/>`;
-  }
-
-  svg.innerHTML = `
-    <polygon points="${plan.wall}" fill="${isActive?'#1b2434':'#131924'}" stroke="${isActive?'#3d4a63':'#242c3a'}" stroke-width="5"/>
-    ${trail}
-    ${shelves}
-    ${stairsMark}
-  `;
+const svgToWorld = (sx, sy) => ({ x:(sx-300)*SVG_TO_3D, z:(sy-210)*SVG_TO_3D });
+function wallBounds(wallStr){
+  const pts = wallStr.trim().split(' ').map(p=>p.split(',').map(Number));
+  const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]);
+  return { minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys) };
 }
 
-function updateIsoMap(){
-  const f1 = $('#isoFloor1'), f2 = $('#isoFloor2');
-  f1.classList.toggle('active', activeFloor===1);
-  f1.classList.toggle('inactive', activeFloor!==1);
-  f2.classList.toggle('active', activeFloor===2);
-  f2.classList.toggle('inactive', activeFloor!==2);
+let renderer3, scene3, camera3, userMesh3;
+let floorGroups = {};
+const shelfMeshes3 = {};
+let needsRender3 = false, rafPending3 = false;
+let baseCamPos, baseCamTarget, tiltCamPos, tiltCamTarget, currentLookAt;
+let cameraTiltActive = false;
 
-  const userPin1 = $('#isoPinUser1'), userPin2 = $('#isoPinUser2');
-  userPin1.hidden = activeFloor!==1;
-  userPin2.hidden = activeFloor!==2;
-  const activeUserPin = activeFloor===1 ? userPin1 : userPin2;
-  activeUserPin.style.left = (user.x/600*100) + '%';
-  activeUserPin.style.top = (user.y/420*100) + '%';
-
-  const tPin1 = $('#isoPinTarget1'), tPin2 = $('#isoPinTarget2');
-  tPin1.hidden = true; tPin2.hidden = true;
-  if(target){
-    const pin = target.floor===1 ? tPin1 : tPin2;
-    pin.hidden = false;
-    pin.style.left = (target.x/600*100) + '%';
-    pin.style.top = (target.y/420*100) + '%';
+function requestRender3(){
+  needsRender3 = true;
+  if(!rafPending3){
+    rafPending3 = true;
+    requestAnimationFrame(()=>{ rafPending3=false; if(needsRender3){ needsRender3=false; renderer3.render(scene3, camera3); } });
   }
+}
+
+// tween acotado (usado solo para la transición de piso y el tilt de cámara,
+// nunca como loop continuo de fondo)
+function animateValue3(duration, onUpdate, onDone){
+  if(reduceMotion){ onUpdate(1); requestRender3(); if(onDone) onDone(); return; }
+  const start = performance.now();
+  (function step(now){
+    const t = Math.min(1, (now-start)/duration);
+    onUpdate(1 - Math.pow(1-t, 3)); // ease-out cúbico
+    requestRender3();
+    if(t<1) requestAnimationFrame(step); else if(onDone) onDone();
+  })(start);
+}
+
+function buildFloorGroup(floorNum, baseY){
+  const group = new THREE.Group();
+  const plan = FLOOR_PLANS[floorNum];
+  const b = wallBounds(plan.wall);
+  const w = (b.maxX-b.minX)*SVG_TO_3D, d = (b.maxY-b.minY)*SVG_TO_3D;
+  const cx = ((b.minX+b.maxX)/2 - 300)*SVG_TO_3D, cz = ((b.minY+b.maxY)/2 - 210)*SVG_TO_3D;
+
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(w, SLAB_THICK, d),
+    new THREE.MeshLambertMaterial({ color:0x1b2434, transparent:true })
+  );
+  slab.position.set(cx, baseY, cz);
+  slab.castShadow = false; slab.receiveShadow = false;
+  group.add(slab);
+
+  SHELVES.filter(s=>s.floor===floorNum).forEach(s=>{
+    const p = svgToWorld(s.x, s.y);
+    const h = 1.7;
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1.15, h, 1.15),
+      new THREE.MeshLambertMaterial({ color:0x3a4457, transparent:true })
+    );
+    mesh.position.set(p.x, baseY + SLAB_THICK/2 + h/2, p.z);
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    group.add(mesh);
+    shelfMeshes3[s.id] = mesh;
+  });
+
+  const sp = svgToWorld(plan.stairs.x, plan.stairs.y);
+  const stairsMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1.35, 1.35, 1.35),
+    new THREE.MeshLambertMaterial({ color:0x3a4457, transparent:true })
+  );
+  stairsMesh.position.set(sp.x, baseY + SLAB_THICK/2 + 0.675, sp.z);
+  stairsMesh.castShadow = false; stairsMesh.receiveShadow = false;
+  group.add(stairsMesh);
+
+  group.userData = { floorNum, slab, stairsMesh, baseY };
+  return group;
+}
+
+function initThree(){
+  const wrap = $('#threeCanvasWrap');
+  renderer3 = new THREE.WebGLRenderer({ canvas:$('#threeCanvas'), antialias:true });
+  renderer3.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer3.shadowMap.enabled = false; // sin sombras dinámicas: 60fps en gama baja
+  renderer3.setClearColor(0x0d1219, 1);
+
+  scene3 = new THREE.Scene();
+
+  const aspect = Math.max(wrap.clientWidth,1) / Math.max(wrap.clientHeight,1);
+  const frustum = 15.5;
+  camera3 = new THREE.OrthographicCamera(-frustum*aspect, frustum*aspect, frustum, -frustum, 0.1, 100);
+  baseCamPos = new THREE.Vector3(15, 14, 15);
+  baseCamTarget = new THREE.Vector3(0, FLOOR_GAP*0.4, 0);
+  tiltCamPos = new THREE.Vector3(15, 17.5, 13.5);
+  tiltCamTarget = new THREE.Vector3(0, FLOOR_GAP*0.95, 0);
+  currentLookAt = baseCamTarget.clone();
+  camera3.position.copy(baseCamPos);
+  camera3.lookAt(currentLookAt);
+
+  scene3.add(new THREE.AmbientLight(0x8891a8, 0.95));
+  const dir = new THREE.DirectionalLight(0xbfe9f0, 0.65);
+  dir.position.set(6, 14, 8);
+  dir.castShadow = false;
+  scene3.add(dir);
+
+  floorGroups[1] = buildFloorGroup(1, 0);
+  floorGroups[2] = buildFloorGroup(2, FLOOR_GAP);
+  scene3.add(floorGroups[1], floorGroups[2]);
+
+  const stairsSvg = FLOOR_PLANS[1].stairs;
+  const sp = svgToWorld(stairsSvg.x, stairsSvg.y);
+  const shaft = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 0.2, FLOOR_GAP, 10),
+    new THREE.MeshLambertMaterial({ color:0xe3a052, transparent:true, opacity:.5 })
+  );
+  shaft.position.set(sp.x, FLOOR_GAP/2, sp.z);
+  scene3.add(shaft);
+
+  // avatar del usuario: flecha 3D (cono de base triangular) tendida sobre el
+  // plano del suelo, apuntando en la dirección de la brújula
+  const arrowGeo = new THREE.ConeGeometry(0.5, 1.4, 3);
+  arrowGeo.rotateX(-Math.PI/2); // el ápice queda apuntando hacia -Z (rumbo 0 = "arriba")
+  userMesh3 = new THREE.Mesh(arrowGeo, new THREE.MeshLambertMaterial({ color:0x46d7e8 }));
+  userMesh3.castShadow = false; userMesh3.receiveShadow = false;
+  scene3.add(userMesh3);
+
+  const ro = new ResizeObserver(()=> resizeThree());
+  ro.observe(wrap);
+
+  requestRender3();
+}
+
+function resizeThree(){
+  if(!renderer3) return;
+  const wrap = $('#threeCanvasWrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if(w<2 || h<2) return;
+  const aspect = w/h, frustum = 15.5;
+  camera3.left = -frustum*aspect; camera3.right = frustum*aspect;
+  camera3.top = frustum; camera3.bottom = -frustum;
+  camera3.updateProjectionMatrix();
+  renderer3.setSize(w, h, false);
+  requestRender3();
+}
+
+function updateUserMarker3(){
+  if(!userMesh3) return;
+  const p = svgToWorld(user.x, user.y);
+  const floorY = floorGroups[activeFloor].userData.baseY;
+  userMesh3.position.set(p.x, floorY + SLAB_THICK/2 + 0.55, p.z);
+  userMesh3.rotation.y = -THREE.MathUtils.degToRad(user.heading);
+  requestRender3();
+}
+
+function updateSceneHighlights3(){
+  if(!scene3) return;
+  const cf = isCrossFloor();
+  Object.entries(shelfMeshes3).forEach(([id, m])=>{
+    m.material.color.set(target && id===target.id ? 0xe3a052 : 0x3a4457);
+  });
+  [1,2].forEach(fn=>{
+    const g = floorGroups[fn];
+    const isActive = fn===activeFloor;
+    g.userData.stairsMesh.material.color.set(cf && isActive ? 0xe3a052 : 0x3a4457);
+    const op = isActive ? 1 : 0.35;
+    g.traverse(o=>{ if(o.isMesh) o.material.opacity = op; });
+  });
+  requestRender3();
+}
+
+function setCameraTilt3(active){
+  if(!camera3 || active===cameraTiltActive) return;
+  cameraTiltActive = active;
+  const fromPos = camera3.position.clone(), toPos = active ? tiltCamPos : baseCamPos;
+  const fromTarget = currentLookAt.clone(), toTarget = active ? tiltCamTarget : baseCamTarget;
+  animateValue3(650, t=>{
+    camera3.position.lerpVectors(fromPos, toPos, t);
+    currentLookAt.lerpVectors(fromTarget, toTarget, t);
+    camera3.lookAt(currentLookAt);
+  });
+}
+
+// transición al cambiar de planta: el marcador "sube/baja" con una animación
+// corta y acotada (no es un loop continuo, termina y vuelve a render-on-demand)
+function animateFloorClimb3(){
+  if(!userMesh3) return;
+  const fromY = userMesh3.position.y;
+  const toY = floorGroups[activeFloor].userData.baseY + SLAB_THICK/2 + 0.55;
+  animateValue3(500, t=>{
+    userMesh3.position.y = fromY + (toY-fromY)*t;
+  });
 }
 
 function setFloor(f){
@@ -1022,7 +1092,8 @@ function setFloor(f){
   lastRel = null;
   stepsInsideGeofence = 0; geofenceDismissed = false;
   checkTilt();
-  if(target) render(); else { renderIsoFloor(1); renderIsoFloor(2); updateIsoMap(); }
+  if(target){ render(); } else { updateSceneHighlights3(); }
+  animateFloorClimb3();
 }
 document.querySelectorAll('.floor-btn').forEach(b=>
   b.addEventListener('click', ()=> setFloor(Number(b.dataset.floor)))
@@ -1063,6 +1134,7 @@ $('#arrivalReset').addEventListener('click', ()=>{
 /* Estado inicial: demo ya cargada con un ejemplo real de las instrucciones */
 buildChips();
 setSensorUI('inactive');
+initThree();
 selectTarget(SHELVES.find(s=>s.id==='E-2'));
 $('#searchInput').value = 'QA 76.73';
 </script>
