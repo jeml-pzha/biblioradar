@@ -5,6 +5,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <style>
   /* ---- Tokens: deliberate single dark "instrument" theme (radar/locator device) ---- */
   :root{
@@ -309,10 +310,17 @@
   .iso-map-legend i{ width:7px; height:7px; border-radius:2px; display:inline-block; }
 
   .iso-canvas-wrap{
-    position:relative; width:100%; height:250px;
-    border-radius:14px; overflow:hidden; background:#0d1219;
+    position:relative; width:100%; height:320px;
+    border-radius:16px; overflow:hidden; background:#050811;
+    border:1px solid rgba(0,243,255,.35);
+    box-shadow:0 0 0 1px rgba(0,243,255,.1), 0 0 44px -8px rgba(0,243,255,.45),
+      inset 0 0 46px rgba(6,60,90,.45);
   }
   #threeCanvas{ width:100%; height:100%; display:block; touch-action:none; }
+  .iso-hint{
+    margin-top:9px; text-align:center; font-size:11px; color:var(--ink-faint);
+    letter-spacing:.02em;
+  }
 
   /* ---- Arrival overlay ---- */
   .arrival{
@@ -424,15 +432,16 @@
 
       <div class="iso-map">
         <div class="iso-map-head">
-          <span class="iso-map-label">Plano isométrico · 2 niveles</span>
+          <span class="iso-map-label">Holograma 3D · 2 niveles</span>
           <div class="iso-map-legend">
-            <span><i style="background:var(--brass)"></i>Destino</span>
-            <span><i style="background:var(--signal)"></i>Tú</span>
+            <span><i style="background:#ffbb55"></i>Destino</span>
+            <span><i style="background:#00f3ff"></i>Tú</span>
           </div>
         </div>
         <div class="iso-canvas-wrap" id="threeCanvasWrap">
           <canvas id="threeCanvas"></canvas>
         </div>
+        <p class="iso-hint">Arrastra para rotar · Pellizca para zoom</p>
       </div>
 
     <!-- ARRIVAL -->
@@ -885,13 +894,19 @@ window.addEventListener('resize', checkTilt);
 window.addEventListener('orientationchange', checkTilt);
 
 /* ---------------------------------------------------------------
-   Mapa 3D nativo — escena Three.js real (WebGL), low-poly, dos
-   plantas como BoxGeometry separadas en Y. Sin sombras dinámicas,
-   sin loop continuo: renderiza solo cuando algo cambia (render-on-demand).
+   Holograma 3D nativo — escena Three.js real (WebGL) estilo
+   Stark Tech: pisos de cristal wireframe translúcido, rejilla de
+   neón, marcadores como fuentes de luz, cámara libre con OrbitControls.
+   Requiere un loop continuo (spin ambiental + damping de la cámara),
+   pero se mantiene barato: sin sombras, sin PBR, geometría low-poly.
 ------------------------------------------------------------------*/
 const SVG_TO_3D = 1/20;      // escala: unidades del viewBox (600x420) -> unidades 3D
 const FLOOR_GAP = 6.4;       // separación vertical entre plantas
 const SLAB_THICK = 0.6;
+const HOLO_CYAN = 0x00f3ff;
+const HOLO_BLUE = 0x1a5c86;
+const HOLO_BLUE_DEEP = 0x123a5e;
+const HOLO_AMBER = 0xffbb55;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const svgToWorld = (sx, sy) => ({ x:(sx-300)*SVG_TO_3D, z:(sy-210)*SVG_TO_3D });
@@ -901,32 +916,50 @@ function wallBounds(wallStr){
   return { minX:Math.min(...xs), maxX:Math.max(...xs), minY:Math.min(...ys), maxY:Math.max(...ys) };
 }
 
-let renderer3, scene3, camera3, userMesh3;
+let renderer3, scene3, camera3, controls3, clock3, userMesh3, targetMarker3;
 let floorGroups = {};
-const shelfMeshes3 = {};
-let needsRender3 = false, rafPending3 = false;
-let baseCamPos, baseCamTarget, tiltCamPos, tiltCamTarget, currentLookAt;
+const shelfMeshes3 = {}; // id -> { mesh, wire }
+let baseCamPos, baseCamTarget, tiltCamTarget;
 let cameraTiltActive = false;
 
-function requestRender3(){
-  needsRender3 = true;
-  if(!rafPending3){
-    rafPending3 = true;
-    requestAnimationFrame(()=>{ rafPending3=false; if(needsRender3){ needsRender3=false; renderer3.render(scene3, camera3); } });
-  }
+// helper: material translúcido "de cristal" que además recuerda su opacidad
+// base en userData, para poder atenuarla por piso sin perder su valor propio
+function holoMat(color, opacity){
+  return new THREE.MeshBasicMaterial({ color, transparent:true, opacity, side:THREE.DoubleSide, depthWrite:false });
+}
+function holoLine(color, opacity){
+  return new THREE.LineBasicMaterial({ color, transparent:true, opacity });
+}
+function withBaseOpacity(obj3d, opacity){
+  obj3d.userData.baseOpacity = opacity;
+  return obj3d;
 }
 
-// tween acotado (usado solo para la transición de piso y el tilt de cámara,
-// nunca como loop continuo de fondo)
+// tween acotado (transición de piso, tilt de cámara) — nunca es el loop
+// principal, solo mueve un valor en el tiempo; el render lo hace animate3()
 function animateValue3(duration, onUpdate, onDone){
-  if(reduceMotion){ onUpdate(1); requestRender3(); if(onDone) onDone(); return; }
+  if(reduceMotion){ onUpdate(1); if(onDone) onDone(); return; }
   const start = performance.now();
   (function step(now){
     const t = Math.min(1, (now-start)/duration);
     onUpdate(1 - Math.pow(1-t, 3)); // ease-out cúbico
-    requestRender3();
     if(t<1) requestAnimationFrame(step); else if(onDone) onDone();
   })(start);
+}
+
+function buildGlowMarker(color){
+  const group = new THREE.Group();
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.2, 10, 1, true), holoMat(color, 0.5));
+  withBaseOpacity(beam, 0.5);
+  beam.position.y = 1.1;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.045, 8, 28), holoMat(color, 0.9));
+  withBaseOpacity(ring, 0.9);
+  ring.rotation.x = Math.PI/2;
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), holoMat(color, 1));
+  withBaseOpacity(core, 1);
+  group.add(beam, ring, core);
+  group.userData.ring = ring; group.userData.beam = beam; group.userData.core = core;
+  return group;
 }
 
 function buildFloorGroup(floorNum, baseY){
@@ -936,37 +969,46 @@ function buildFloorGroup(floorNum, baseY){
   const w = (b.maxX-b.minX)*SVG_TO_3D, d = (b.maxY-b.minY)*SVG_TO_3D;
   const cx = ((b.minX+b.maxX)/2 - 300)*SVG_TO_3D, cz = ((b.minY+b.maxY)/2 - 210)*SVG_TO_3D;
 
-  const slab = new THREE.Mesh(
-    new THREE.BoxGeometry(w, SLAB_THICK, d),
-    new THREE.MeshLambertMaterial({ color:0x1b2434, transparent:true })
-  );
-  slab.position.set(cx, baseY, cz);
-  slab.castShadow = false; slab.receiveShadow = false;
-  group.add(slab);
+  // piso holográfico: caja de cristal casi invisible + aristas de neón + rejilla de luz
+  const slabGeo = new THREE.BoxGeometry(w, SLAB_THICK, d);
+  const glass = new THREE.Mesh(slabGeo, holoMat(HOLO_BLUE_DEEP, 0.14));
+  withBaseOpacity(glass, 0.14);
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(slabGeo), holoLine(HOLO_CYAN, 0.85));
+  withBaseOpacity(edges, 0.85);
+  glass.position.set(cx, baseY, cz);
+  edges.position.copy(glass.position);
+  group.add(glass, edges);
+
+  const floorGrid = new THREE.GridHelper(Math.max(w,d)*1.02, 14, HOLO_CYAN, HOLO_BLUE_DEEP);
+  floorGrid.position.set(cx, baseY + SLAB_THICK/2 + 0.01, cz);
+  floorGrid.material.transparent = true;
+  withBaseOpacity(floorGrid, 0.55);
+  floorGrid.material.opacity = 0.55;
+  group.add(floorGrid);
 
   SHELVES.filter(s=>s.floor===floorNum).forEach(s=>{
     const p = svgToWorld(s.x, s.y);
     const h = 1.7;
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(1.15, h, 1.15),
-      new THREE.MeshLambertMaterial({ color:0x3a4457, transparent:true })
-    );
+    const geo = new THREE.BoxGeometry(1.15, h, 1.15);
+    const mesh = new THREE.Mesh(geo, holoMat(HOLO_BLUE, 0.25));
+    const wire = new THREE.LineSegments(new THREE.EdgesGeometry(geo), holoLine(HOLO_CYAN, 0.8));
+    withBaseOpacity(mesh, 0.25); withBaseOpacity(wire, 0.8);
     mesh.position.set(p.x, baseY + SLAB_THICK/2 + h/2, p.z);
-    mesh.castShadow = false; mesh.receiveShadow = false;
-    group.add(mesh);
-    shelfMeshes3[s.id] = mesh;
+    wire.position.copy(mesh.position);
+    group.add(mesh, wire);
+    shelfMeshes3[s.id] = { mesh, wire };
   });
 
   const sp = svgToWorld(plan.stairs.x, plan.stairs.y);
-  const stairsMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(1.35, 1.35, 1.35),
-    new THREE.MeshLambertMaterial({ color:0x3a4457, transparent:true })
-  );
+  const stairsGeo = new THREE.BoxGeometry(1.35, 1.35, 1.35);
+  const stairsMesh = new THREE.Mesh(stairsGeo, holoMat(HOLO_BLUE, 0.25));
+  const stairsWire = new THREE.LineSegments(new THREE.EdgesGeometry(stairsGeo), holoLine(HOLO_CYAN, 0.8));
+  withBaseOpacity(stairsMesh, 0.25); withBaseOpacity(stairsWire, 0.8);
   stairsMesh.position.set(sp.x, baseY + SLAB_THICK/2 + 0.675, sp.z);
-  stairsMesh.castShadow = false; stairsMesh.receiveShadow = false;
-  group.add(stairsMesh);
+  stairsWire.position.copy(stairsMesh.position);
+  group.add(stairsMesh, stairsWire);
 
-  group.userData = { floorNum, slab, stairsMesh, baseY };
+  group.userData = { floorNum, baseY, stairsMesh, stairsWire };
   return group;
 }
 
@@ -974,8 +1016,8 @@ function initThree(){
   const wrap = $('#threeCanvasWrap');
   renderer3 = new THREE.WebGLRenderer({ canvas:$('#threeCanvas'), antialias:true });
   renderer3.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer3.shadowMap.enabled = false; // sin sombras dinámicas: 60fps en gama baja
-  renderer3.setClearColor(0x0d1219, 1);
+  renderer3.shadowMap.enabled = false; // sin sombras dinámicas: barato en cualquier gama
+  renderer3.setClearColor(0x050811, 1); // negro profundo, máximo contraste del brillo neón
 
   scene3 = new THREE.Scene();
 
@@ -984,43 +1026,87 @@ function initThree(){
   camera3 = new THREE.OrthographicCamera(-frustum*aspect, frustum*aspect, frustum, -frustum, 0.1, 100);
   baseCamPos = new THREE.Vector3(15, 14, 15);
   baseCamTarget = new THREE.Vector3(0, FLOOR_GAP*0.4, 0);
-  tiltCamPos = new THREE.Vector3(15, 17.5, 13.5);
   tiltCamTarget = new THREE.Vector3(0, FLOOR_GAP*0.95, 0);
-  currentLookAt = baseCamTarget.clone();
   camera3.position.copy(baseCamPos);
-  camera3.lookAt(currentLookAt);
+  camera3.lookAt(baseCamTarget);
 
-  scene3.add(new THREE.AmbientLight(0x8891a8, 0.95));
-  const dir = new THREE.DirectionalLight(0xbfe9f0, 0.65);
-  dir.position.set(6, 14, 8);
-  dir.castShadow = false;
-  scene3.add(dir);
+  // todo el holograma usa MeshBasicMaterial (autoiluminado, ignora las
+  // luces de la escena) — no hace falta ninguna luz para que brille.
 
   floorGroups[1] = buildFloorGroup(1, 0);
   floorGroups[2] = buildFloorGroup(2, FLOOR_GAP);
   scene3.add(floorGroups[1], floorGroups[2]);
 
+  // rejilla de coordenadas brillante en la base del holograma completo
+  const baseBounds = wallBounds(FLOOR_PLANS[1].wall);
+  const baseSize = Math.max(baseBounds.maxX-baseBounds.minX, baseBounds.maxY-baseBounds.minY) * SVG_TO_3D * 1.15;
+  const baseGrid = new THREE.GridHelper(baseSize, 20, HOLO_CYAN, HOLO_BLUE_DEEP);
+  baseGrid.position.y = -SLAB_THICK/2 - 0.5;
+  baseGrid.material.transparent = true;
+  baseGrid.material.opacity = 0.35;
+  scene3.add(baseGrid);
+
+  // eje del hueco de la escalera, conectando ambas plantas
   const stairsSvg = FLOOR_PLANS[1].stairs;
   const sp = svgToWorld(stairsSvg.x, stairsSvg.y);
   const shaft = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.2, 0.2, FLOOR_GAP, 10),
-    new THREE.MeshLambertMaterial({ color:0xe3a052, transparent:true, opacity:.5 })
+    new THREE.CylinderGeometry(0.16, 0.16, FLOOR_GAP, 10, 1, true),
+    holoMat(HOLO_CYAN, 0.4)
   );
   shaft.position.set(sp.x, FLOOR_GAP/2, sp.z);
   scene3.add(shaft);
 
-  // avatar del usuario: flecha 3D (cono de base triangular) tendida sobre el
-  // plano del suelo, apuntando en la dirección de la brújula
-  const arrowGeo = new THREE.ConeGeometry(0.5, 1.4, 3);
-  arrowGeo.rotateX(-Math.PI/2); // el ápice queda apuntando hacia -Z (rumbo 0 = "arriba")
-  userMesh3 = new THREE.Mesh(arrowGeo, new THREE.MeshLambertMaterial({ color:0x46d7e8 }));
-  userMesh3.castShadow = false; userMesh3.receiveShadow = false;
+  // marcador destino: baliza de luz (haz + anillo giratorio + núcleo) en ámbar
+  targetMarker3 = buildGlowMarker(HOLO_AMBER);
+  targetMarker3.visible = false;
+  scene3.add(targetMarker3);
+
+  // avatar del usuario: la misma baliza de luz en cian + un cono holográfico
+  // que marca el rumbo real de la brújula
+  userMesh3 = buildGlowMarker(HOLO_CYAN);
+  const arrowGeo = new THREE.ConeGeometry(0.3, 0.85, 3);
+  arrowGeo.rotateX(-Math.PI/2); // el ápice apunta a -Z (rumbo 0 = "arriba")
+  const arrow = new THREE.Mesh(arrowGeo, holoMat(HOLO_CYAN, 1));
+  arrow.position.y = 0.5;
+  userMesh3.add(arrow);
+  userMesh3.userData.arrow = arrow;
   scene3.add(userMesh3);
+
+  // control de cámara libre: rotar en 360°, pellizcar para zoom, inclinar
+  controls3 = new THREE.OrbitControls(camera3, renderer3.domElement);
+  controls3.enableDamping = true;
+  controls3.dampingFactor = 0.08;
+  controls3.minZoom = 0.5; controls3.maxZoom = 3.2;
+  controls3.minPolarAngle = Math.PI*0.08;
+  controls3.maxPolarAngle = Math.PI*0.49; // no dejar que la cámara baje bajo el suelo
+  controls3.target.copy(baseCamTarget);
+  controls3.update();
 
   const ro = new ResizeObserver(()=> resizeThree());
   ro.observe(wrap);
 
-  requestRender3();
+  clock3 = new THREE.Clock();
+  animate3();
+}
+
+// loop continuo: necesario para el damping de OrbitControls y el brillo
+// ambiental (anillos girando, núcleo pulsante) — se mantiene barato porque
+// no hay sombras, ni PBR, ni más de ~20 objetos low-poly en escena.
+function animate3(){
+  requestAnimationFrame(animate3);
+  if(!renderer3) return;
+  controls3.update();
+  const t = clock3.getElapsedTime();
+  if(!reduceMotion){
+    userMesh3.userData.ring.rotation.z = t*1.4;
+    userMesh3.userData.core.scale.setScalar(0.85 + Math.sin(t*4)*0.15);
+    if(targetMarker3.visible){
+      targetMarker3.userData.ring.rotation.z = -t*1.05;
+      const pulse = 0.85 + Math.sin(t*3.2 + 1)*0.15;
+      targetMarker3.userData.core.scale.setScalar(pulse);
+    }
+  }
+  renderer3.render(scene3, camera3);
 }
 
 function resizeThree(){
@@ -1033,55 +1119,68 @@ function resizeThree(){
   camera3.top = frustum; camera3.bottom = -frustum;
   camera3.updateProjectionMatrix();
   renderer3.setSize(w, h, false);
-  requestRender3();
 }
 
 function updateUserMarker3(){
   if(!userMesh3) return;
   const p = svgToWorld(user.x, user.y);
   const floorY = floorGroups[activeFloor].userData.baseY;
-  userMesh3.position.set(p.x, floorY + SLAB_THICK/2 + 0.55, p.z);
+  userMesh3.position.set(p.x, floorY + SLAB_THICK/2, p.z);
   userMesh3.rotation.y = -THREE.MathUtils.degToRad(user.heading);
-  requestRender3();
+}
+
+function updateTargetBeacon3(){
+  if(!targetMarker3) return;
+  if(!target){ targetMarker3.visible = false; return; }
+  targetMarker3.visible = true;
+  const p = svgToWorld(target.x, target.y);
+  const baseY = floorGroups[target.floor].userData.baseY;
+  targetMarker3.position.set(p.x, baseY + SLAB_THICK/2, p.z);
+  const factor = target.floor===activeFloor ? 1 : 0.4; // "fantasma" si está en el otro piso
+  targetMarker3.userData.ring.material.opacity = targetMarker3.userData.ring.userData.baseOpacity*factor;
+  targetMarker3.userData.beam.material.opacity = targetMarker3.userData.beam.userData.baseOpacity*factor;
+  targetMarker3.userData.core.material.opacity = targetMarker3.userData.core.userData.baseOpacity*factor;
 }
 
 function updateSceneHighlights3(){
   if(!scene3) return;
   const cf = isCrossFloor();
-  Object.entries(shelfMeshes3).forEach(([id, m])=>{
-    m.material.color.set(target && id===target.id ? 0xe3a052 : 0x3a4457);
+  Object.entries(shelfMeshes3).forEach(([id, { mesh, wire }])=>{
+    const isTarget = target && id===target.id;
+    mesh.material.color.set(isTarget ? HOLO_AMBER : HOLO_BLUE);
+    wire.material.color.set(isTarget ? HOLO_AMBER : HOLO_CYAN);
+    mesh.userData.baseOpacity = isTarget ? 0.85 : 0.25;
   });
   [1,2].forEach(fn=>{
     const g = floorGroups[fn];
     const isActive = fn===activeFloor;
-    g.userData.stairsMesh.material.color.set(cf && isActive ? 0xe3a052 : 0x3a4457);
-    const op = isActive ? 1 : 0.35;
-    g.traverse(o=>{ if(o.isMesh) o.material.opacity = op; });
+    const stairsHi = cf && isActive;
+    g.userData.stairsMesh.material.color.set(stairsHi ? HOLO_AMBER : HOLO_BLUE);
+    g.userData.stairsMesh.userData.baseOpacity = stairsHi ? 0.85 : 0.25;
+    const dim = isActive ? 1 : 0.32;
+    g.traverse(o=>{
+      if(o.userData && o.userData.baseOpacity !== undefined && o.material){
+        o.material.opacity = o.userData.baseOpacity * dim;
+      }
+    });
   });
-  requestRender3();
+  updateTargetBeacon3();
 }
 
 function setCameraTilt3(active){
-  if(!camera3 || active===cameraTiltActive) return;
+  if(!controls3 || active===cameraTiltActive) return;
   cameraTiltActive = active;
-  const fromPos = camera3.position.clone(), toPos = active ? tiltCamPos : baseCamPos;
-  const fromTarget = currentLookAt.clone(), toTarget = active ? tiltCamTarget : baseCamTarget;
-  animateValue3(650, t=>{
-    camera3.position.lerpVectors(fromPos, toPos, t);
-    currentLookAt.lerpVectors(fromTarget, toTarget, t);
-    camera3.lookAt(currentLookAt);
-  });
+  const from = controls3.target.clone(), to = active ? tiltCamTarget : baseCamTarget;
+  animateValue3(650, t=>{ controls3.target.lerpVectors(from, to, t); });
 }
 
 // transición al cambiar de planta: el marcador "sube/baja" con una animación
-// corta y acotada (no es un loop continuo, termina y vuelve a render-on-demand)
+// corta y acotada (no es el loop de fondo, solo dura 500ms)
 function animateFloorClimb3(){
   if(!userMesh3) return;
   const fromY = userMesh3.position.y;
-  const toY = floorGroups[activeFloor].userData.baseY + SLAB_THICK/2 + 0.55;
-  animateValue3(500, t=>{
-    userMesh3.position.y = fromY + (toY-fromY)*t;
-  });
+  const toY = floorGroups[activeFloor].userData.baseY + SLAB_THICK/2;
+  animateValue3(500, t=>{ userMesh3.position.y = fromY + (toY-fromY)*t; });
 }
 
 function setFloor(f){
