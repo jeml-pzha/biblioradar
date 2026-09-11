@@ -236,6 +236,47 @@
     display:flex; gap:14px;
   }
 
+  /* ---- Detalle de estante: vista frontal cortada por repisas ---- */
+  .shelf-detail{
+    margin-top:18px; width:100%; max-width:300px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:16px;
+    padding:12px 12px 14px;
+  }
+  .shelf-detail.arrived{ border-color:rgba(227,160,82,.55); box-shadow:0 0 0 1px rgba(227,160,82,.18), 0 0 24px -8px rgba(227,160,82,.5); }
+  .shelf-detail-label{
+    font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint);
+    font-weight:700; display:block; margin-bottom:8px;
+  }
+  .shelf-diagram{ display:flex; flex-direction:column; gap:3px; }
+  .shelf-row{
+    display:flex; align-items:center; gap:9px;
+    background:var(--surface-3); border:1px solid var(--line); border-radius:8px;
+    padding:7px 10px; transition:background-color .2s, border-color .2s;
+  }
+  .shelf-row-num{
+    flex-shrink:0; width:19px; height:19px; border-radius:6px;
+    background:var(--bg); color:var(--ink-faint);
+    font-family:var(--font-mono); font-size:10.5px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .shelf-row-label{ flex:1; font-size:12px; font-weight:600; color:var(--ink-dim); min-width:0; }
+  .shelf-row-range{ flex-shrink:0; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); }
+  .shelf-row.hi{
+    background:var(--brass-soft); border-color:rgba(227,160,82,.55);
+    animation:shelfRowGlow 1.8s ease-in-out infinite;
+  }
+  .shelf-row.hi .shelf-row-num{ background:var(--brass); color:#0a0e14; }
+  .shelf-row.hi .shelf-row-label{ color:var(--ink); }
+  .shelf-row.hi .shelf-row-range{ color:var(--brass); }
+  @keyframes shelfRowGlow{
+    0%,100%{ box-shadow:0 0 0 0 rgba(227,160,82,.35); }
+    50%{ box-shadow:0 0 0 5px rgba(227,160,82,0); }
+  }
+  .shelf-instruction{
+    margin:10px 0 0; text-align:center; font-size:12.5px; font-weight:700;
+    color:var(--brass);
+  }
+
   /* proximity states */
   .stage[data-prox="far"]   { --prox: var(--signal); }
   .stage[data-prox="near"]  { --prox: #8fe0b0; }
@@ -352,6 +393,7 @@
     .dist-num.step-flash, .arrow-core.step-flash{ animation:none; }
     .geofence-icon{ animation:none; }
     .geofence-banner{ animation:none; }
+    .shelf-row.hi{ animation:none; }
   }
 </style>
 
@@ -426,6 +468,12 @@
         <span id="bearingRead">OBJETIVO 000°</span>
         <span id="stepRead">PASOS 0</span>
       </div>
+
+      <div class="shelf-detail" id="shelfDetail" hidden>
+        <span class="shelf-detail-label">Detalle de estante · vista frontal</span>
+        <div class="shelf-diagram" id="shelfDiagram"></div>
+        <p class="shelf-instruction" id="shelfInstruction">Estante E-2 · Piso 1 · Repisa 3</p>
+      </div>
     </div>
 
     <div class="tilt-warn" id="tiltWarn" hidden>📱 Mantén el teléfono en vertical</div>
@@ -473,18 +521,93 @@
 <script>
 /* ---------------------------------------------------------------
    data.js — fondo simulado: 9 estantes en 2 plantas (floor:1 / floor:2).
-   Cada uno trae su propio plano en U (viewBox 0 0 600 420) y rango LCC/Dewey.
+   Cada uno trae su propio plano en U (viewBox 0 0 600 420), rango LCC/Dewey
+   y ahora un mapeo granular por repisa (shelfLevels) — cada repisa cubre un
+   sub-rango de la signatura y una categoría, para localización fina (3D Shelf Mapping).
 ------------------------------------------------------------------*/
+// construye N repisas dividiendo [start,end] en bandas (no necesariamente iguales)
+// definidas por sus propios límites, para poder curar dónde cae cada categoría.
+function levels(...bands){
+  return bands.map((b, i) => ({ level:i+1, from:b[0], to:b[1], label:b[2] }));
+}
+
 const SHELVES = [
-  { id:'E-1', floor:1, class:'PN', start:1990,   end:1999,   subject:'Cine y medios',              x:70,  y:60  },
-  { id:'E-2', floor:1, class:'QA', start:75,     end:76.99,  subject:'Informática',                x:70,  y:180 },
-  { id:'E-3', floor:1, class:'TK', start:5101,   end:5991,   subject:'Telecomunicaciones',         x:150, y:340 },
-  { id:'E-4', floor:1, class:'HG', start:4001,   end:4500,   subject:'Finanzas',                   x:450, y:300 },
-  { id:'E-5', floor:1, class:'DP', start:1,      end:402,    subject:'Historia de España',         x:530, y:170 },
-  { id:'E-6', floor:1, class:'ND', start:1990,   end:3416,   subject:'Pintura',                    x:530, y:60  },
-  { id:'E-7', floor:2, class:'PQ', start:2001,   end:2999,   subject:'Literatura románica',        x:150, y:110 },
-  { id:'E-8', floor:2, class:'BF', start:1,      end:990,    subject:'Psicología',                 x:300, y:280 },
-  { id:'E-9', floor:2, class:'GV', start:1000,   end:1198,   subject:'Deportes y recreación',      x:460, y:110 },
+  { id:'E-1', floor:1, class:'PN', start:1990, end:1999, subject:'Cine y medios', x:70, y:60,
+    shelvesCount:4, dims:{ width:1.1, depth:1.1 },
+    shelfLevels: levels(
+      [1990,   1992.5, 'Historia del cine'],
+      [1992.5, 1995,   'Guionismo'],
+      [1995,   1997.5, 'Producción audiovisual'],
+      [1997.5, 1999,   'Crítica y teoría'],
+    ) },
+  { id:'E-2', floor:1, class:'QA', start:75, end:76.99, subject:'Informática', x:70, y:180,
+    shelvesCount:5, dims:{ width:1.15, depth:1.15 },
+    shelfLevels: levels(
+      [75.00, 75.39, 'Fundamentos y teoría'],
+      [75.39, 75.78, 'Estructuras de datos'],
+      [75.78, 76.80, 'Algoritmos'],
+      [76.80, 76.92, 'Programación aplicada'],
+      [76.92, 76.99, 'Redes y sistemas'],
+    ) },
+  { id:'E-3', floor:1, class:'TK', start:5101, end:5991, subject:'Telecomunicaciones', x:150, y:340,
+    shelvesCount:5, dims:{ width:1.15, depth:1.15 },
+    shelfLevels: levels(
+      [5101, 5300, 'Fundamentos de señales'],
+      [5300, 5500, 'Redes móviles'],
+      [5500, 5700, 'Fibra óptica'],
+      [5700, 5850, 'Satélites'],
+      [5850, 5991, 'IoT y 5G'],
+    ) },
+  { id:'E-4', floor:1, class:'HG', start:4001, end:4500, subject:'Finanzas', x:450, y:300,
+    shelvesCount:5, dims:{ width:1.15, depth:1.15 },
+    shelfLevels: levels(
+      [4001, 4100, 'Teoría financiera'],
+      [4100, 4220, 'Mercados de capitales'],
+      [4220, 4350, 'Banca y crédito'],
+      [4350, 4450, 'Finanzas corporativas'],
+      [4450, 4500, 'Fintech y criptoactivos'],
+    ) },
+  { id:'E-5', floor:1, class:'DP', start:1, end:402, subject:'Historia de España', x:530, y:170,
+    shelvesCount:4, dims:{ width:1.1, depth:1.1 },
+    shelfLevels: levels(
+      [1,   100, 'Edad Media'],
+      [100, 220, 'Edad Moderna'],
+      [220, 320, 'Siglo XIX'],
+      [320, 402, 'Siglo XX y XXI'],
+    ) },
+  { id:'E-6', floor:1, class:'ND', start:1990, end:3416, subject:'Pintura', x:530, y:60,
+    shelvesCount:5, dims:{ width:1.15, depth:1.15 },
+    shelfLevels: levels(
+      [1990, 2200, 'Renacimiento'],
+      [2200, 2500, 'Barroco'],
+      [2500, 2800, 'Impresionismo'],
+      [2800, 3150, 'Vanguardias'],
+      [3150, 3416, 'Arte contemporáneo'],
+    ) },
+  { id:'E-7', floor:2, class:'PQ', start:2001, end:2999, subject:'Literatura románica', x:150, y:110,
+    shelvesCount:4, dims:{ width:1.1, depth:1.1 },
+    shelfLevels: levels(
+      [2001, 2350, 'Literatura francesa'],
+      [2350, 2650, 'Literatura italiana'],
+      [2650, 2850, 'Literatura portuguesa'],
+      [2850, 2999, 'Literatura rumana'],
+    ) },
+  { id:'E-8', floor:2, class:'BF', start:1, end:990, subject:'Psicología', x:300, y:280,
+    shelvesCount:5, dims:{ width:1.15, depth:1.15 },
+    shelfLevels: levels(
+      [1,   150, 'Psicología general'],
+      [150, 350, 'Psicología cognitiva'],
+      [350, 550, 'Psicología clínica'],
+      [550, 780, 'Psicología social'],
+      [780, 990, 'Neuropsicología'],
+    ) },
+  { id:'E-9', floor:2, class:'GV', start:1000, end:1198, subject:'Deportes y recreación', x:460, y:110,
+    shelvesCount:3, dims:{ width:1.0, depth:1.0 },
+    shelfLevels: levels(
+      [1000, 1070, 'Deportes de equipo'],
+      [1070, 1140, 'Deportes individuales'],
+      [1140, 1198, 'Recreación y ocio'],
+    ) },
 ];
 
 // Plano físico por piso: contorno de paredes + punto de transición (escalera).
@@ -516,12 +639,36 @@ function findShelf(raw){
   return null;
 }
 
+// localización fina: dado un estante y el número de la signatura, halla la
+// repisa exacta (si el número cae fuera de las bandas curadas — p.ej. porque
+// el estante se resolvió por el fallback de "misma clase" — usa la repisa
+// más cercana en vez de fallar).
+function findShelfLevel(shelf, num){
+  if(!shelf || !shelf.shelfLevels || !shelf.shelfLevels.length) return null;
+  const exact = shelf.shelfLevels.find(l => num>=l.from && num<=l.to);
+  if(exact) return exact;
+  return num < shelf.shelfLevels[0].from
+    ? shelf.shelfLevels[0]
+    : shelf.shelfLevels[shelf.shelfLevels.length-1];
+}
+
+// localiza en un solo paso: estante + piso + repisa exacta, a partir de la
+// signatura completa tal como la escribió el usuario.
+function locateSignature(raw){
+  const p = parseSignature(raw);
+  if(!p) return null;
+  const shelf = findShelf(raw);
+  if(!shelf) return null;
+  return { shelf, level: findShelfLevel(shelf, p.num) };
+}
+
 /* ---------------------------------------------------------------
    Estado + motor de navegación
 ------------------------------------------------------------------*/
 let user = {...ENTRANCE};
 let target = null;
 let arrived = false;
+let locatedLevel = null; // repisa exacta de la búsqueda actual (o null si no aplica)
 
 const $ = sel => document.querySelector(sel);
 const stage=$('#stage'), emptyState=$('#emptyState'), navUI=$('#navUI'), sensorBar=$('#sensorBar'),
@@ -535,13 +682,16 @@ function buildChips(){
     c.addEventListener('click', ()=>{
       const s = SHELVES.find(sh=>sh.id===c.dataset.id);
       $('#searchInput').value = rangeLabel(s).replace('–','-');
-      selectTarget(s);
+      // un chip no trae un número específico de libro: usamos el punto medio
+      // del rango del estante como signatura representativa para su repisa.
+      selectTarget(s, (s.start+s.end)/2);
     });
   });
 }
 
-function selectTarget(shelf){
+function selectTarget(shelf, num){
   target = shelf;
+  locatedLevel = findShelfLevel(shelf, num !== undefined ? num : shelf.start);
   user.x = ENTRANCE.x; user.y = ENTRANCE.y;
   if(!sensorsActive) user.heading = ENTRANCE.heading;
   arrived = false;
@@ -555,8 +705,33 @@ function selectTarget(shelf){
   arrival.hidden = true;
   geofenceDismissed = false;
   document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.id===shelf.id));
+  renderShelfDetail();
   checkTilt();
   render();
+}
+
+// Módulo "Detalle de estante": vista frontal cortada por repisas, con la
+// repisa exacta de la búsqueda actual iluminada (3D Shelf Mapping en 2D).
+function renderShelfDetail(){
+  const panel = $('#shelfDetail');
+  if(!target || !target.shelfLevels || !target.shelfLevels.length){
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  panel.classList.remove('arrived');
+  // repisa 1 = banda superior de la estantería, igual que en la vista 3D
+  const rows = [...target.shelfLevels].reverse().map(l=>{
+    const hi = locatedLevel && l.level===locatedLevel.level;
+    return `<div class="shelf-row ${hi?'hi':''}">
+      <span class="shelf-row-num">${l.level}</span>
+      <span class="shelf-row-label">${l.label}</span>
+      <span class="shelf-row-range">${target.class} ${l.from.toFixed(2)}–${l.to.toFixed(2)}</span>
+    </div>`;
+  }).join('');
+  $('#shelfDiagram').innerHTML = rows;
+  const levelTxt = locatedLevel ? `Repisa ${locatedLevel.level}` : 'Repisa —';
+  $('#shelfInstruction').textContent = `Estante ${target.id} · Piso ${target.floor} · ${levelTxt} (nivel de la vista)`;
 }
 
 // Si el objetivo está en otro piso, navegamos hacia la escalera de ESTE piso
@@ -677,6 +852,7 @@ function render(){
     $('#arrivalCode').textContent = `${target.id} · P${target.floor} · ${rangeLabel(target)}`;
     $('#arrivalSubject').textContent = target.subject;
     arrival.hidden = false;
+    $('#shelfDetail').classList.add('arrived');
   }
 }
 
@@ -903,6 +1079,7 @@ window.addEventListener('orientationchange', checkTilt);
 const SVG_TO_3D = 1/20;      // escala: unidades del viewBox (600x420) -> unidades 3D
 const FLOOR_GAP = 6.4;       // separación vertical entre plantas
 const SLAB_THICK = 0.6;
+const LEVEL_HEIGHT_3D = 0.34; // alto 3D de cada repisa individual (3D Shelf Mapping)
 const HOLO_CYAN = 0x00f3ff;
 const HOLO_BLUE = 0x1a5c86;
 const HOLO_BLUE_DEEP = 0x123a5e;
@@ -918,9 +1095,10 @@ function wallBounds(wallStr){
 
 let renderer3, scene3, camera3, controls3, clock3, userMesh3, targetMarker3;
 let floorGroups = {};
-const shelfMeshes3 = {}; // id -> { mesh, wire }
+const shelfMeshes3 = {}; // id -> { bands:[{level,mesh,wire}], totalH }
 let baseCamPos, baseCamTarget, tiltCamTarget;
 let cameraTiltActive = false;
+let glowBands3 = []; // { mesh, rest } — repisa(s) resaltada(s), para el pulso ambiental
 
 // helper: material translúcido "de cristal" que además recuerda su opacidad
 // base en userData, para poder atenuarla por piso sin perder su valor propio
@@ -986,17 +1164,32 @@ function buildFloorGroup(floorNum, baseY){
   floorGrid.material.opacity = 0.55;
   group.add(floorGrid);
 
+  // cada estante es una PILA de repisas individuales (3D Shelf Mapping): una
+  // caja de cristal + arista de neón por cada nivel, para poder resaltar
+  // exactamente la fila donde está el libro buscado.
   SHELVES.filter(s=>s.floor===floorNum).forEach(s=>{
     const p = svgToWorld(s.x, s.y);
-    const h = 1.7;
-    const geo = new THREE.BoxGeometry(1.15, h, 1.15);
-    const mesh = new THREE.Mesh(geo, holoMat(HOLO_BLUE, 0.25));
-    const wire = new THREE.LineSegments(new THREE.EdgesGeometry(geo), holoLine(HOLO_CYAN, 0.8));
-    withBaseOpacity(mesh, 0.25); withBaseOpacity(wire, 0.8);
-    mesh.position.set(p.x, baseY + SLAB_THICK/2 + h/2, p.z);
-    wire.position.copy(mesh.position);
-    group.add(mesh, wire);
-    shelfMeshes3[s.id] = { mesh, wire };
+    const n = Math.max(1, s.shelvesCount || 1);
+    const dims = s.dims || { width:1.15, depth:1.15 };
+    const totalH = n * LEVEL_HEIGHT_3D;
+    const shelfBaseY = baseY + SLAB_THICK/2;
+    const bandGap = LEVEL_HEIGHT_3D * 0.12;
+    const bandH = LEVEL_HEIGHT_3D - bandGap;
+
+    const bands = [];
+    for(let i=0; i<n; i++){
+      const levelNum = i+1; // repisa 1 = banda superior, igual que en el módulo 2D
+      const yCenter = shelfBaseY + totalH - (i+0.5)*LEVEL_HEIGHT_3D;
+      const geo = new THREE.BoxGeometry(dims.width, bandH, dims.depth);
+      const mesh = new THREE.Mesh(geo, holoMat(HOLO_BLUE, 0.22));
+      const wire = new THREE.LineSegments(new THREE.EdgesGeometry(geo), holoLine(HOLO_CYAN, 0.7));
+      withBaseOpacity(mesh, 0.22); withBaseOpacity(wire, 0.7);
+      mesh.position.set(p.x, yCenter, p.z);
+      wire.position.copy(mesh.position);
+      group.add(mesh, wire);
+      bands.push({ level:levelNum, mesh, wire });
+    }
+    shelfMeshes3[s.id] = { bands, totalH };
   });
 
   const sp = svgToWorld(plan.stairs.x, plan.stairs.y);
@@ -1105,6 +1298,10 @@ function animate3(){
       const pulse = 0.85 + Math.sin(t*3.2 + 1)*0.15;
       targetMarker3.userData.core.scale.setScalar(pulse);
     }
+    if(glowBands3.length){
+      const bandPulse = 0.7 + Math.sin(t*3.6)*0.3; // segmento de la repisa "resplandeciente"
+      glowBands3.forEach(({mesh, rest})=>{ mesh.material.opacity = rest*bandPulse; });
+    }
   }
   renderer3.render(scene3, camera3);
 }
@@ -1135,21 +1332,29 @@ function updateTargetBeacon3(){
   targetMarker3.visible = true;
   const p = svgToWorld(target.x, target.y);
   const baseY = floorGroups[target.floor].userData.baseY;
-  targetMarker3.position.set(p.x, baseY + SLAB_THICK/2, p.z);
+  const totalH = shelfMeshes3[target.id] ? shelfMeshes3[target.id].totalH : 0;
+  targetMarker3.position.set(p.x, baseY + SLAB_THICK/2 + totalH, p.z);
   const factor = target.floor===activeFloor ? 1 : 0.4; // "fantasma" si está en el otro piso
   targetMarker3.userData.ring.material.opacity = targetMarker3.userData.ring.userData.baseOpacity*factor;
   targetMarker3.userData.beam.material.opacity = targetMarker3.userData.beam.userData.baseOpacity*factor;
   targetMarker3.userData.core.material.opacity = targetMarker3.userData.core.userData.baseOpacity*factor;
 }
 
+// resalta, dentro del estante objetivo, SOLO la banda de la repisa exacta
+// (locatedLevel) con un segmento neón — el resto del estante queda ghost.
 function updateSceneHighlights3(){
   if(!scene3) return;
   const cf = isCrossFloor();
-  Object.entries(shelfMeshes3).forEach(([id, { mesh, wire }])=>{
-    const isTarget = target && id===target.id;
-    mesh.material.color.set(isTarget ? HOLO_AMBER : HOLO_BLUE);
-    wire.material.color.set(isTarget ? HOLO_AMBER : HOLO_CYAN);
-    mesh.userData.baseOpacity = isTarget ? 0.85 : 0.25;
+  glowBands3 = [];
+  Object.entries(shelfMeshes3).forEach(([id, entry])=>{
+    const isTargetShelf = target && id===target.id;
+    entry.bands.forEach(band=>{
+      const isHiLevel = isTargetShelf && locatedLevel && band.level===locatedLevel.level;
+      band.mesh.material.color.set(isHiLevel ? HOLO_AMBER : HOLO_BLUE);
+      band.wire.material.color.set(isHiLevel ? HOLO_AMBER : HOLO_CYAN);
+      band.mesh.userData.baseOpacity = isHiLevel ? 0.92 : (isTargetShelf ? 0.32 : 0.22);
+      band.wire.userData.baseOpacity = isHiLevel ? 1 : 0.7;
+    });
   });
   [1,2].forEach(fn=>{
     const g = floorGroups[fn];
@@ -1164,6 +1369,12 @@ function updateSceneHighlights3(){
       }
     });
   });
+  // capturar el/los segmento(s) iluminados DESPUÉS del atenuado por piso, para
+  // que el pulso ambiental de animate3() respire alrededor del valor correcto
+  if(target && locatedLevel && shelfMeshes3[target.id]){
+    const band = shelfMeshes3[target.id].bands.find(b=>b.level===locatedLevel.level);
+    if(band) glowBands3.push({ mesh:band.mesh, rest:band.mesh.material.opacity });
+  }
   updateTargetBeacon3();
 }
 
@@ -1204,8 +1415,8 @@ document.querySelectorAll('.floor-btn').forEach(b=>
 function trySearch(){
   const raw = $('#searchInput').value;
   if(!raw.trim()) return;
-  const shelf = findShelf(raw);
-  if(shelf){ selectTarget(shelf); }
+  const loc = locateSignature(raw);
+  if(loc){ selectTarget(loc.shelf, parseSignature(raw).num); }
   else { errMsg.hidden = false; }
 }
 $('#goBtn').addEventListener('click', trySearch);
@@ -1224,8 +1435,9 @@ $('#geofenceClose').addEventListener('click', e=>{
 $('#arrivalReset').addEventListener('click', ()=>{
   arrival.hidden = true; navUI.hidden = true; sensorBar.hidden = true;
   tiltWarn.hidden = true; $('#floorAlert').hidden = true; $('#geofenceBanner').hidden = true;
-  emptyState.hidden = false; target = null; $('#searchInput').value=''; errMsg.hidden=true;
+  emptyState.hidden = false; target = null; locatedLevel = null; $('#searchInput').value=''; errMsg.hidden=true;
   stepsInsideGeofence = 0; geofenceDismissed = false;
+  $('#shelfDetail').hidden = true; $('#shelfDetail').classList.remove('arrived');
   document.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
   $('#searchInput').focus();
 });
@@ -1234,6 +1446,6 @@ $('#arrivalReset').addEventListener('click', ()=>{
 buildChips();
 setSensorUI('inactive');
 initThree();
-selectTarget(SHELVES.find(s=>s.id==='E-2'));
+selectTarget(SHELVES.find(s=>s.id==='E-2'), 76.73);
 $('#searchInput').value = 'QA 76.73';
 </script>
